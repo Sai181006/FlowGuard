@@ -1,10 +1,19 @@
-"""Learning-switch forwarding with attributable IPv4/UDP flow counters."""
+"""OpenFlow forwarding, counter monitoring, flood detection and timed mitigation."""
+
+import json
+import os
+import time
+from datetime import datetime, timezone
+from pathlib import Path
 
 from os_ken.base import app_manager
 from os_ken.controller import ofp_event
 from os_ken.controller.handler import CONFIG_DISPATCHER, DEAD_DISPATCHER, MAIN_DISPATCHER, set_ev_cls
 from os_ken.lib.packet import arp, ether_types, ethernet, ipv4, packet
+from os_ken.lib import hub
 from os_ken.ofproto import ofproto_v1_3
+
+from controller.detection import CounterTracker, FlowCounter, TwoWindowDetector
 
 
 LAB_MAC_TO_IP = {
@@ -21,10 +30,15 @@ COOKIE_MISS = COOKIE_BASE | 1
 COOKIE_CONTROL = COOKIE_BASE | 2
 COOKIE_UDP = COOKIE_BASE | 3
 COOKIE_PUNT = COOKIE_BASE | 4
+COOKIE_DROP = COOKIE_BASE | 5
 PRIORITY_PUNT = 5
 PRIORITY_CONTROL = 20
 PRIORITY_UDP = 100
+PRIORITY_DROP = 200
 FLOW_IDLE_TIMEOUT = 30
+VICTIM_IP = "10.0.0.10"
+VICTIM_PORT = 9000
+DEFAULT_CONFIG = Path(__file__).resolve().parents[1] / "config" / "detector.json"
 
 
 def forwarding_match_fields(eth_type, in_port, source_mac, destination_mac, ip_packet):
@@ -52,16 +66,63 @@ def forwarding_match_fields(eth_type, in_port, source_mac, destination_mac, ip_p
     return None
 
 
+def drop_match_fields(source):
+    """Restrict mitigation to one UDP source and the lab victim's echo port."""
+    if source not in LAB_IPS or source in (VICTIM_IP, "10.0.0.11"):
+        raise ValueError("source is not an eligible lab attack host")
+    return {"eth_type": ether_types.ETH_TYPE_IP, "ip_proto": 17,
+            "ipv4_src": source, "ipv4_dst": VICTIM_IP, "udp_dst": VICTIM_PORT}
+
+
 class ForwardingController(app_manager.OSKenApp):
-    """Control the one-switch lab; telemetry and mitigation arrive in M4/M5."""
+    """Control the fixed five-host lab and log every alert/mitigation decision."""
 
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.mac_to_port = {}
+        self.datapaths = {}
+        self.trackers = {}
+        self.detectors = {}
+        self.drop_counters = {}
+        self.active_blocks = {}
+        self.pending_replies = {}
+        self.pending_barriers = {}
+        self.config = json.loads(Path(os.environ.get("FLOWGUARD_CONFIG", DEFAULT_CONFIG)).read_text())
+        self.mitigation_enabled = os.environ.get("FLOWGUARD_MITIGATION", "1") != "0"
+        self.event_file = os.environ.get("FLOWGUARD_EVENTS")
+        self.monitor_thread = hub.spawn(self._monitor)
 
-    def _add_flow(self, datapath, priority, match, actions, cookie, idle_timeout=0):
+    def _event(self, kind, **details):
+        record = {"type": kind, "time_utc": datetime.now(timezone.utc).isoformat(),
+                  "monotonic_s": time.monotonic(), **details}
+        self.logger.info("FLOWGUARD %s", json.dumps(record, sort_keys=True))
+        if self.event_file:
+            with open(self.event_file, "a", encoding="utf-8") as stream:
+                stream.write(json.dumps(record, sort_keys=True) + "\n")
+
+    def _new_detector(self):
+        return TwoWindowDetector(
+            self.config["victim_pps"], self.config["source_pps"],
+            self.config["min_sources"], self.config["consecutive_windows"],
+            self.config.get("protected_sources", ()),
+        )
+
+    def _monitor(self):
+        while True:
+            for datapath in list(self.datapaths.values()):
+                ofp = datapath.ofproto
+                parser = datapath.ofproto_parser
+                request = parser.OFPFlowStatsRequest(
+                    datapath, 0, ofp.OFPTT_ALL, ofp.OFPP_ANY, ofp.OFPG_ANY,
+                    COOKIE_BASE, COOKIE_MASK,
+                    parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP, ip_proto=17, ipv4_dst=VICTIM_IP),
+                )
+                datapath.send_msg(request)
+            hub.sleep(float(self.config["poll_interval_s"]))
+
+    def _add_flow(self, datapath, priority, match, actions, cookie, idle_timeout=0, hard_timeout=0, flags=0):
         ofp = datapath.ofproto
         parser = datapath.ofproto_parser
         instructions = [parser.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, actions)]
@@ -74,6 +135,8 @@ class ForwardingController(app_manager.OSKenApp):
                 instructions=instructions,
                 cookie=cookie,
                 idle_timeout=idle_timeout,
+                hard_timeout=hard_timeout,
+                flags=flags,
             )
         )
 
@@ -83,6 +146,11 @@ class ForwardingController(app_manager.OSKenApp):
         ofp = datapath.ofproto
         parser = datapath.ofproto_parser
         self.mac_to_port[datapath.id] = {}
+        self.datapaths[datapath.id] = datapath
+        self.trackers[datapath.id] = CounterTracker()
+        self.detectors[datapath.id] = self._new_detector()
+        self.drop_counters[datapath.id] = {}
+        self.active_blocks[datapath.id] = {}
         # A reconnect may leave old flows in OVS. Remove only this app's cookie range.
         datapath.send_msg(
             parser.OFPFlowMod(
@@ -122,11 +190,97 @@ class ForwardingController(app_manager.OSKenApp):
                     cookie=COOKIE_PUNT,
                 )
         self.logger.info("OpenFlow 1.3 switch connected: dpid=%s; forwarding state reset", datapath.id)
+        self._event("switch_connected", dpid=datapath.id, mitigation_enabled=self.mitigation_enabled)
 
     @set_ev_cls(ofp_event.EventOFPStateChange, DEAD_DISPATCHER)
     def switch_disconnected_handler(self, ev):
         self.mac_to_port.pop(ev.datapath.id, None)
+        self.datapaths.pop(ev.datapath.id, None)
+        self.trackers.pop(ev.datapath.id, None)
+        self.detectors.pop(ev.datapath.id, None)
+        self.drop_counters.pop(ev.datapath.id, None)
+        self.active_blocks.pop(ev.datapath.id, None)
         self.logger.info("Switch disconnected: dpid=%s", ev.datapath.id)
+
+    @set_ev_cls(ofp_event.EventOFPFlowStatsReply, MAIN_DISPATCHER)
+    def flow_stats_handler(self, ev):
+        message = ev.msg
+        datapath = message.datapath
+        key = (datapath.id, message.xid)
+        flows = self.pending_replies.setdefault(key, [])
+        flows.extend(message.body)
+        if message.flags & datapath.ofproto.OFPMPF_REPLY_MORE:
+            return
+        self.pending_replies.pop(key, None)
+        now = time.monotonic()
+        counters = []
+        dropped = {}
+        for stat in flows:
+            fields = dict(stat.match.items())
+            source = fields.get("ipv4_src")
+            if not source or fields.get("ipv4_dst") != VICTIM_IP:
+                continue
+            if stat.cookie == COOKIE_UDP:
+                identity = f"{fields.get('in_port')}:{fields.get('eth_src')}:{fields.get('eth_dst')}"
+                counters.append(FlowCounter(source, VICTIM_IP, identity, stat.packet_count, stat.byte_count))
+            elif stat.cookie == COOKIE_DROP:
+                dropped[source] = stat.packet_count
+        tracker = self.trackers.get(datapath.id)
+        detector = self.detectors.get(datapath.id)
+        if tracker is None or detector is None:
+            return
+        rates = tracker.sample(now, counters)
+        previous_drop = self.drop_counters[datapath.id]
+        drop_deltas = {source: max(0, count - previous_drop.get(source, count)) for source, count in dropped.items()}
+        self.drop_counters[datapath.id] = dropped
+        self._event("sample", dpid=datapath.id, **rates, drop_packet_delta=drop_deltas,
+                    drop_packet_total=dropped)
+        if rates["elapsed_s"] is None or rates["elapsed_s"] <= 0:
+            return
+        alert = detector.observe(rates)
+        if alert is not None:
+            self._event("alert", dpid=datapath.id, victim=VICTIM_IP, **alert)
+            if self.mitigation_enabled:
+                self._mitigate(datapath, alert["sources"], now)
+
+    def _mitigate(self, datapath, sources, now):
+        parser = datapath.ofproto_parser
+        ofp = datapath.ofproto
+        blocks = self.active_blocks[datapath.id]
+        installed = []
+        for source in sources:
+            if source not in LAB_IPS or source in self.config.get("protected_sources", ()):
+                continue
+            if blocks.get(source, 0) > now:
+                continue
+            timeout = int(self.config["mitigation_hard_timeout_s"])
+            match = parser.OFPMatch(**drop_match_fields(source))
+            self._add_flow(datapath, PRIORITY_DROP, match, [], COOKIE_DROP,
+                           hard_timeout=timeout, flags=ofp.OFPFF_SEND_FLOW_REM)
+            blocks[source] = now + timeout
+            installed.append(source)
+            self._event("drop_requested", dpid=datapath.id, source=source, victim=VICTIM_IP,
+                        port=VICTIM_PORT, hard_timeout_s=timeout)
+        if installed:
+            barrier = parser.OFPBarrierRequest(datapath)
+            datapath.send_msg(barrier)
+            self.pending_barriers[(datapath.id, barrier.xid)] = installed
+
+    @set_ev_cls(ofp_event.EventOFPBarrierReply, MAIN_DISPATCHER)
+    def barrier_handler(self, ev):
+        sources = self.pending_barriers.pop((ev.msg.datapath.id, ev.msg.xid), None)
+        if sources:
+            self._event("drop_confirmed", dpid=ev.msg.datapath.id, sources=sources)
+
+    @set_ev_cls(ofp_event.EventOFPFlowRemoved, MAIN_DISPATCHER)
+    def flow_removed_handler(self, ev):
+        message = ev.msg
+        if message.cookie != COOKIE_DROP:
+            return
+        source = dict(message.match.items()).get("ipv4_src")
+        self.active_blocks.get(message.datapath.id, {}).pop(source, None)
+        self._event("drop_removed", dpid=message.datapath.id, source=source,
+                    packets=message.packet_count, reason=message.reason)
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def packet_in_handler(self, ev):

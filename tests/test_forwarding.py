@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from os_ken.lib.packet import ether_types
 
-from controller.forwarding import COOKIE_CONTROL, COOKIE_UDP, PRIORITY_CONTROL, PRIORITY_UDP, forwarding_match_fields
+from controller.forwarding import COOKIE_CONTROL, COOKIE_UDP, PRIORITY_CONTROL, PRIORITY_UDP, forwarding_match_fields, drop_match_fields
 from topology.lab_topology import HOSTS
 from controller.forwarding import LAB_MAC_TO_IP
 
@@ -40,6 +40,17 @@ class ForwardingMatchTests(unittest.TestCase):
                 ether_types.ETH_TYPE_IP, 2, "02:00:00:00:00:11", "02:00:00:00:00:10", tcp_packet
             )
         )
+
+    def test_mitigation_match_is_source_destination_and_service_specific(self):
+        fields = drop_match_fields("10.0.0.21")
+        self.assertEqual(fields["ipv4_src"], "10.0.0.21")
+        self.assertEqual(fields["ipv4_dst"], "10.0.0.10")
+        self.assertEqual(fields["udp_dst"], 9000)
+        self.assertEqual(fields["ip_proto"], 17)
+        with self.assertRaises(ValueError):
+            drop_match_fields("10.0.0.11")
+        with self.assertRaises(ValueError):
+            drop_match_fields("8.8.8.8")
 
 
 if __name__ == "__main__":

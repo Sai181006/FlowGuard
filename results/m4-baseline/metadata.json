@@ -1,0 +1,26 @@
+{
+  "mode": "baseline",
+  "started_utc": "2026-10-13T16:59:11.601761+00:00",
+  "pps_per_attacker": 600,
+  "duration_s": 300,
+  "mitigation_enabled": true,
+  "config": {
+    "poll_interval_s": 1.0,
+    "victim_pps": 100.0,
+    "source_pps": 30.0,
+    "min_sources": 2,
+    "consecutive_windows": 2,
+    "protected_sources": [
+      "10.0.0.11"
+    ],
+    "mitigation_hard_timeout_s": 10
+  },
+  "ping_loss_percent": 0.0,
+  "phase_start_monotonic_s": 65.195804994,
+  "phase_start_utc": "2026-10-13T16:59:19.272211+00:00",
+  "burst_duration_s": 0.6,
+  "burst_pps_per_source": 70,
+  "finished_utc": "2026-10-13T17:04:19.579848+00:00",
+  "finished_monotonic_s": 365.50349465,
+  "status": "completed"
+}

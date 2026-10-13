@@ -1,0 +1,9 @@
+{
+  "poll_interval_s": 1.0,
+  "victim_pps": 100.0,
+  "source_pps": 30.0,
+  "min_sources": 2,
+  "consecutive_windows": 2,
+  "protected_sources": ["10.0.0.11"],
+  "mitigation_hard_timeout_s": 10
+}
