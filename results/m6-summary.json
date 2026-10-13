@@ -1,0 +1,217 @@
+{
+  "baseline": {
+    "mode": "baseline",
+    "status": "completed",
+    "ping_loss_percent": 0.0,
+    "samples": 307,
+    "alerts": 0,
+    "drop_requests": 0,
+    "drop_confirmations": 0,
+    "drop_removals": 0,
+    "normal_client": {
+      "sent": 600,
+      "received": 600
+    },
+    "normal_a1": {
+      "sent": 600,
+      "received": 600
+    },
+    "normal_max_victim_pps": 5.997506818422796,
+    "normal_max_source_pps": 2.998753409211398,
+    "observed_max_victim_pps_with_burst": 39.928876768113966
+  },
+  "matched_comparison": {
+    "attack_off": {
+      "mode": "attack-off",
+      "status": "completed",
+      "ping_loss_percent": 0.0,
+      "samples": 29,
+      "alerts": 1,
+      "drop_requests": 0,
+      "drop_confirmations": 0,
+      "drop_removals": 0,
+      "attack_start_monotonic_s": 139.991810443,
+      "first_alert_latency_s": 1.5399745340000095,
+      "first_alert_sources": [
+        "10.0.0.21",
+        "10.0.0.22"
+      ],
+      "first_drop_confirmation_latency_s": null,
+      "client": {
+        "sent": 80,
+        "received": 80
+      },
+      "recovery_client": {
+        "sent": 10,
+        "received": 10
+      },
+      "drop_rules_after_recovery": 0,
+      "attacker_windows": [
+        {
+          "relative_s": 0.18716181199999937,
+          "pps": 1200.5543578240136
+        },
+        {
+          "relative_s": 1.1875330090000205,
+          "pps": 1199.8282153695084
+        },
+        {
+          "relative_s": 2.1885096360000205,
+          "pps": 1200.4090518282926
+        },
+        {
+          "relative_s": 3.1890019250000137,
+          "pps": 1199.8560256759129
+        },
+        {
+          "relative_s": 4.189121918000012,
+          "pps": 1199.7003825710751
+        },
+        {
+          "relative_s": 5.190205203000005,
+          "pps": 1199.9978928036794
+        },
+        {
+          "relative_s": 6.190206959000022,
+          "pps": 1199.8157814847316
+        }
+      ],
+      "attacker_mean_pps_all_windows": 1200.023101079602,
+      "removed_after_attack_s": []
+    },
+    "attack_on": {
+      "mode": "attack-on",
+      "status": "completed",
+      "ping_loss_percent": 0.0,
+      "samples": 28,
+      "alerts": 1,
+      "drop_requests": 2,
+      "drop_confirmations": 1,
+      "drop_removals": 2,
+      "attack_start_monotonic_s": 213.342388003,
+      "first_alert_latency_s": 1.5548087570000177,
+      "first_alert_sources": [
+        "10.0.0.21",
+        "10.0.0.22"
+      ],
+      "first_drop_confirmation_latency_s": 1.6337545380000051,
+      "client": {
+        "sent": 80,
+        "received": 80
+      },
+      "recovery_client": {
+        "sent": 10,
+        "received": 10
+      },
+      "drop_rules_after_recovery": 0,
+      "attacker_windows": [
+        {
+          "relative_s": 0.19695513100000994,
+          "pps": 1199.9124747843612
+        },
+        {
+          "relative_s": 1.197028074000002,
+          "pps": 474.79289931048083
+        },
+        {
+          "relative_s": 2.203782810000007,
+          "pps": 0.0
+        },
+        {
+          "relative_s": 3.2075967650000052,
+          "pps": 0.0
+        },
+        {
+          "relative_s": 4.2094962719999955,
+          "pps": 0.0
+        },
+        {
+          "relative_s": 5.212272471000006,
+          "pps": 0.0
+        },
+        {
+          "relative_s": 6.2142347959999995,
+          "pps": 0.0
+        }
+      ],
+      "attacker_mean_pps_all_windows": 239.24362487069172,
+      "removed_after_attack_s": [
+        3.585152339999979,
+        3.5931102649999787
+      ]
+    },
+    "comparison_start_s": 2.133754538000005,
+    "unmitigated_attacker_pps": 1199.9558268727383,
+    "mitigated_attacker_pps": 0.0,
+    "victim_attacker_rate_reduction_percent": 100.0,
+    "legitimate_success_with_mitigation_percent": 100.0
+  },
+  "maximum_bounded_load_without_mitigation": {
+    "mode": "attack-off",
+    "status": "completed",
+    "ping_loss_percent": 0.0,
+    "samples": 29,
+    "alerts": 1,
+    "drop_requests": 0,
+    "drop_confirmations": 0,
+    "drop_removals": 0,
+    "attack_start_monotonic_s": 271.180851987,
+    "first_alert_latency_s": 1.4330677359999981,
+    "first_alert_sources": [
+      "10.0.0.21",
+      "10.0.0.22"
+    ],
+    "first_drop_confirmation_latency_s": null,
+    "client": {
+      "sent": 80,
+      "received": 80
+    },
+    "recovery_client": {
+      "sent": 10,
+      "received": 10
+    },
+    "drop_rules_after_recovery": 0,
+    "attacker_windows": [
+      {
+        "relative_s": 0.15061908600000606,
+        "pps": 3999.962904343883
+      },
+      {
+        "relative_s": 1.1506283600000415,
+        "pps": 4000.2188745447083
+      },
+      {
+        "relative_s": 2.1510736170000087,
+        "pps": 4000.785593899307
+      },
+      {
+        "relative_s": 3.1511272079999912,
+        "pps": 3998.7684473140826
+      },
+      {
+        "relative_s": 4.151185114000043,
+        "pps": 4000.281635020676
+      },
+      {
+        "relative_s": 5.151614675000019,
+        "pps": 3999.81797228383
+      },
+      {
+        "relative_s": 6.151660184000036,
+        "pps": 4000.2270873543043
+      }
+    ],
+    "attacker_mean_pps_all_windows": 4000.008930680113,
+    "removed_after_attack_s": []
+  },
+  "environment": {
+    "os": "Ubuntu 26.04 LTS in WSL2",
+    "kernel": "6.18.33.2-microsoft-standard-WSL2",
+    "python": "3.14.4",
+    "mininet": "2.3.0-1.1build1",
+    "openvswitch": "3.7.1-2",
+    "os_ken": "4.1.1-1ubuntu2",
+    "cpu": "12th Gen Intel Core i5-12450HX, 12 logical CPUs visible to WSL2",
+    "wsl_mem_total_kb": 7981708
+  }
+}

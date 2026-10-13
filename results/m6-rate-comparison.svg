@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="700" viewBox="0 0 1180 700">
+<rect width="1180" height="700" fill="white"/>
+<text x="90" y="38" font-family="Arial" font-size="24" font-weight="bold">Victim-received attacker traffic</text>
+<text x="90" y="64" font-family="Arial" font-size="15">Two sources, 600 packets/s each, eight seconds per trial</text>
+<line x1="90" x2="1070" y1="570.0" y2="570.0" stroke="#D6DCE5"/>
+<text x="76" y="575.0" text-anchor="end" font-family="Arial" font-size="15">0</text>
+<line x1="90" x2="1070" y1="427.1" y2="427.1" stroke="#D6DCE5"/>
+<text x="76" y="432.1" text-anchor="end" font-family="Arial" font-size="15">400</text>
+<line x1="90" x2="1070" y1="284.3" y2="284.3" stroke="#D6DCE5"/>
+<text x="76" y="289.3" text-anchor="end" font-family="Arial" font-size="15">800</text>
+<line x1="90" x2="1070" y1="141.4" y2="141.4" stroke="#D6DCE5"/>
+<text x="76" y="146.4" text-anchor="end" font-family="Arial" font-size="15">1200</text>
+<text x="90.0" y="598" text-anchor="middle" font-family="Arial" font-size="15">0</text>
+<text x="335.0" y="598" text-anchor="middle" font-family="Arial" font-size="15">2</text>
+<text x="580.0" y="598" text-anchor="middle" font-family="Arial" font-size="15">4</text>
+<text x="825.0" y="598" text-anchor="middle" font-family="Arial" font-size="15">6</text>
+<text x="1070.0" y="598" text-anchor="middle" font-family="Arial" font-size="15">8</text>
+<line x1="90" x2="1070" y1="570" y2="570" stroke="#2C3440" stroke-width="2"/>
+<text x="580.0" y="632" text-anchor="middle" font-family="Arial" font-size="16">Seconds after attack start</text>
+<text transform="translate(26,320.0) rotate(-90)" text-anchor="middle" font-family="Arial" font-size="16">Attacker packets per second</text>
+<polyline points="174.2,141.2 296.7,141.5 419.3,141.3 541.9,141.5 664.4,141.5 787.1,141.4 909.6,141.5" fill="none" stroke="#2459A6" stroke-width="4"/>
+<circle cx="174.2" cy="141.2" r="5" fill="#2459A6"/>
+<circle cx="296.7" cy="141.5" r="5" fill="#2459A6"/>
+<circle cx="419.3" cy="141.3" r="5" fill="#2459A6"/>
+<circle cx="541.9" cy="141.5" r="5" fill="#2459A6"/>
+<circle cx="664.4" cy="141.5" r="5" fill="#2459A6"/>
+<circle cx="787.1" cy="141.4" r="5" fill="#2459A6"/>
+<circle cx="909.6" cy="141.5" r="5" fill="#2459A6"/>
+<line x1="650" x2="684" y1="645" y2="645" stroke="#2459A6" stroke-width="4"/>
+<text x="694" y="650" font-family="Arial" font-size="15">Mitigation off</text>
+<polyline points="175.4,141.5 297.9,400.4 421.2,570.0 544.2,570.0 666.9,570.0 789.8,570.0 912.5,570.0" fill="none" stroke="#D4552D" stroke-width="4"/>
+<circle cx="175.4" cy="141.5" r="5" fill="#D4552D"/>
+<circle cx="297.9" cy="400.4" r="5" fill="#D4552D"/>
+<circle cx="421.2" cy="570.0" r="5" fill="#D4552D"/>
+<circle cx="544.2" cy="570.0" r="5" fill="#D4552D"/>
+<circle cx="666.9" cy="570.0" r="5" fill="#D4552D"/>
+<circle cx="789.8" cy="570.0" r="5" fill="#D4552D"/>
+<circle cx="912.5" cy="570.0" r="5" fill="#D4552D"/>
+<line x1="865" x2="899" y1="645" y2="645" stroke="#D4552D" stroke-width="4"/>
+<text x="909" y="650" font-family="Arial" font-size="15">Mitigation on</text>
+</svg>

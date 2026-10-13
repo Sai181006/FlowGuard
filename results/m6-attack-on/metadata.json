@@ -1,0 +1,27 @@
+{
+  "mode": "attack-on",
+  "started_utc": "2026-10-13T17:12:30.208540+00:00",
+  "pps_per_attacker": 600,
+  "duration_s": 8,
+  "mitigation_enabled": true,
+  "config": {
+    "poll_interval_s": 1.0,
+    "victim_pps": 100.0,
+    "source_pps": 30.0,
+    "min_sources": 2,
+    "consecutive_windows": 2,
+    "protected_sources": [
+      "10.0.0.11"
+    ],
+    "mitigation_hard_timeout_s": 10
+  },
+  "ping_loss_percent": 0.0,
+  "phase_start_monotonic_s": 213.261809137,
+  "phase_start_utc": "2026-10-13T17:12:37.964413+00:00",
+  "attack_end_monotonic_s": 221.383959131,
+  "attack_end_utc": "2026-10-13T17:12:46.086561+00:00",
+  "recovery_probe_exit": 0,
+  "finished_utc": "2026-10-13T17:12:59.282657+00:00",
+  "finished_monotonic_s": 234.580108007,
+  "status": "completed"
+}
