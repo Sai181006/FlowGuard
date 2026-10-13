@@ -17,7 +17,7 @@ from lab_topology import DDoSTopo  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MODES = ("detection", "mitigation", "baseline", "attack-off", "attack-on")
+MODES = ("detection", "mitigation", "mitigation-repeat", "baseline", "attack-off", "attack-on")
 
 
 def utc_now():
@@ -64,7 +64,7 @@ def main():
     if ROOT not in output.parents or output == ROOT:
         parser.error("output must be a subdirectory of this repository")
     output.mkdir(parents=True, exist_ok=True)
-    mitigation = args.mode in ("mitigation", "attack-on", "baseline")
+    mitigation = args.mode in ("mitigation", "mitigation-repeat", "attack-on", "baseline")
     config = ROOT / "config" / "detector.json"
     controller_log = open(output / "controller.log", "w", encoding="utf-8")
     server_log = open(output / "server.log", "w", encoding="utf-8")
@@ -133,6 +133,39 @@ def main():
                 process.wait(timeout=170)
             metadata["burst_duration_s"] = 0.6
             metadata["burst_pps_per_source"] = 70
+        elif args.mode == "mitigation-repeat":
+            metadata["waves"] = []
+            for wave in (1, 2):
+                wave_start = time.monotonic()
+                process, stream = probe(net.get("client"), output / f"client-wave{wave}.csv",
+                                        args.duration_s * 10, 100)
+                children.append(("client", process))
+                streams.append(stream)
+                wave_children = [("client", process)]
+                for host_name in ("a1", "a2"):
+                    stream = open(output / f"attack-{host_name}-wave{wave}.jsonl", "w", encoding="utf-8")
+                    process = net.get(host_name).popen(
+                        [sys.executable, "-u", str(ROOT / "traffic" / "flood.py"),
+                         "--pps", str(args.pps), "--duration-s", str(args.duration_s)],
+                        stdout=stream, stderr=subprocess.STDOUT,
+                    )
+                    children.append((host_name, process))
+                    wave_children.append((host_name, process))
+                    streams.append(stream)
+                time.sleep(min(5, args.duration_s / 2))
+                dump_flows(output / f"flows-during-wave{wave}.txt")
+                for host_name, process in wave_children:
+                    process.wait(timeout=args.duration_s + 10)
+                    if process.returncode != 0 and host_name != "client":
+                        raise RuntimeError(f"wave {wave} flood process failed: {host_name}")
+                metadata["waves"].append({"number": wave, "started_monotonic_s": wave_start,
+                                          "ended_monotonic_s": time.monotonic()})
+                time.sleep(12)
+                dump_flows(output / f"flows-after-wave{wave}.txt")
+            process, stream = probe(net.get("client"), output / "recovery-client.csv", 10, 100)
+            process.wait(timeout=10)
+            stream.close()
+            metadata["recovery_probe_exit"] = process.returncode
         else:
             client_count = args.duration_s * 10
             process, stream = probe(net.get("client"), output / "client.csv", client_count, 100)

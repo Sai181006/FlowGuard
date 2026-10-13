@@ -1,0 +1,37 @@
+{
+  "mode": "mitigation-repeat",
+  "started_utc": "2026-10-13T17:09:08.954200+00:00",
+  "pps_per_attacker": 600,
+  "duration_s": 8,
+  "mitigation_enabled": true,
+  "config": {
+    "poll_interval_s": 1.0,
+    "victim_pps": 100.0,
+    "source_pps": 30.0,
+    "min_sources": 2,
+    "consecutive_windows": 2,
+    "protected_sources": [
+      "10.0.0.11"
+    ],
+    "mitigation_hard_timeout_s": 10
+  },
+  "ping_loss_percent": 0.0,
+  "phase_start_monotonic_s": 11.97963647,
+  "phase_start_utc": "2026-10-13T17:09:16.682240+00:00",
+  "waves": [
+    {
+      "number": 1,
+      "started_monotonic_s": 11.979671135,
+      "ended_monotonic_s": 20.165462428
+    },
+    {
+      "number": 2,
+      "started_monotonic_s": 32.174255279,
+      "ended_monotonic_s": 40.309715096
+    }
+  ],
+  "recovery_probe_exit": 0,
+  "finished_utc": "2026-10-13T17:09:58.179919+00:00",
+  "finished_monotonic_s": 53.477357692,
+  "status": "completed"
+}
