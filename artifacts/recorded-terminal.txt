@@ -1,0 +1,35 @@
+
+====================================================================
+2 | ORIGINAL SDN EVIDENCE: Recalculate the saved experiment
+====================================================================
+
+RECORDED SDN EXPERIMENT — original raw data from 13 October 2026
+Two sources at 600 packets/s each; 8-second traffic phase.
+Baseline alerts: 0
+First detection: 1.555 seconds
+First barrier reply (saved as drop_confirmed): 1.634 seconds
+Compared victim-received attacker rate with mitigation off: 1199.96 packets/s
+Compared victim-received attacker rate with mitigation on:  0.00 packets/s
+Comparison starts 2.134 seconds after attack start.
+Legitimate probes, off: 80/80
+Legitimate probes, on:  80/80
+Drop rules remaining after recovery: 0
+These recorded results show filtering in the original lab. Both modes had zero client loss,
+so they do not establish improved availability under saturation.
+Chart: results/m6-rate-comparison.png
+Raw evidence: controller.jsonl, victim.jsonl, client.csv, flows-during.txt in each trial folder.
+
+ACTUAL SAVED OPENFLOW RULES (historical, not installed by this command):
+  cookie=0xdd05000000000005, duration=2.367s, table=0, n_packets=1287, n_bytes=218790, hard_timeout=10, send_flow_rem priority=200,udp,nw_src=10.0.0.21,nw_dst=10.0.0.10,tp_dst=9000 actions=drop
+  cookie=0xdd05000000000005, duration=2.341s, table=0, n_packets=1217, n_bytes=206890, hard_timeout=10, send_flow_rem priority=200,udp,nw_src=10.0.0.22,nw_dst=10.0.0.10,tp_dst=9000 actions=drop
+Read one rule: priority 200 overrides forwarding; UDP source + victim + port 9000
+select the service; actions=drop discards it; hard_timeout=10 removes it after 10s.
+n_packets is the switch's saved match counter. No client-source drop rule appears.
+A barrier acknowledges ordering. The saved flow table and victim measurements
+supply additional evidence of filtering; the barrier alone is insufficient.
+
+SELECTED SAVED CONTROLLER EVENTS:
+  {"dpid": 1, "monotonic_s": 214.89719676, "sources": {"10.0.0.21": 641.5001116794712, "10.0.0.22": 642.4993330372273}, "time_utc": "2026-10-13T17:12:39.599771+00:00", "type": "alert", "victim": "10.0.0.10", "victim_pps": 1294.9908796520165}
+  {"dpid": 1, "hard_timeout_s": 10, "monotonic_s": 214.92300389, "port": 9000, "source": "10.0.0.21", "time_utc": "2026-10-13T17:12:39.625576+00:00", "type": "drop_requested", "victim": "10.0.0.10"}
+  {"dpid": 1, "hard_timeout_s": 10, "monotonic_s": 214.948690588, "port": 9000, "source": "10.0.0.22", "time_utc": "2026-10-13T17:12:39.651264+00:00", "type": "drop_requested", "victim": "10.0.0.10"}
+  {"dpid": 1, "monotonic_s": 214.976142541, "sources": ["10.0.0.21", "10.0.0.22"], "time_utc": "2026-10-13T17:12:39.678717+00:00", "type": "drop_confirmed"}

@@ -1,6 +1,7 @@
 """OpenFlow forwarding, counter monitoring, flood detection and timed mitigation."""
 
 import json
+import math
 import os
 import time
 from datetime import datetime, timezone
@@ -9,7 +10,7 @@ from pathlib import Path
 from os_ken.base import app_manager
 from os_ken.controller import ofp_event
 from os_ken.controller.handler import CONFIG_DISPATCHER, DEAD_DISPATCHER, MAIN_DISPATCHER, set_ev_cls
-from os_ken.lib.packet import arp, ether_types, ethernet, ipv4, packet
+from os_ken.lib.packet import arp, ether_types, ethernet, ipv4, packet, udp
 from os_ken.lib import hub
 from os_ken.ofproto import ofproto_v1_3
 
@@ -23,7 +24,15 @@ LAB_MAC_TO_IP = {
     "02:00:00:00:00:22": "10.0.0.22",
     "02:00:00:00:00:23": "10.0.0.23",
 }
+LAB_MAC_TO_PORT = {
+    "02:00:00:00:00:10": 1,
+    "02:00:00:00:00:11": 2,
+    "02:00:00:00:00:21": 3,
+    "02:00:00:00:00:22": 4,
+    "02:00:00:00:00:23": 5,
+}
 LAB_IPS = frozenset(LAB_MAC_TO_IP.values())
+LAB_IP_TO_MAC = {address: mac for mac, address in LAB_MAC_TO_IP.items()}
 COOKIE_BASE = 0xDD05000000000000
 COOKIE_MASK = 0xFFFF000000000000
 COOKIE_MISS = COOKIE_BASE | 1
@@ -37,24 +46,107 @@ PRIORITY_UDP = 100
 PRIORITY_DROP = 200
 FLOW_IDLE_TIMEOUT = 30
 VICTIM_IP = "10.0.0.10"
+CLIENT_IP = "10.0.0.11"
 VICTIM_PORT = 9000
 DEFAULT_CONFIG = Path(__file__).resolve().parents[1] / "config" / "detector.json"
 
 
-def forwarding_match_fields(eth_type, in_port, source_mac, destination_mac, ip_packet):
+def validate_config(config):
+    """Reject malformed detector settings and bounds that could disable expiry."""
+    if not isinstance(config, dict):
+        raise ValueError("detector configuration must be a JSON object")
+    required = {
+        "poll_interval_s", "victim_pps", "source_pps", "min_sources",
+        "consecutive_windows", "protected_sources", "mitigation_hard_timeout_s",
+    }
+    missing = required - config.keys()
+    unknown = config.keys() - required
+    if missing or unknown:
+        details = []
+        if missing:
+            details.append(f"missing keys: {', '.join(sorted(missing))}")
+        if unknown:
+            details.append(f"unknown keys: {', '.join(sorted(unknown))}")
+        raise ValueError("invalid detector configuration (" + "; ".join(details) + ")")
+
+    def bounded_number(name, minimum, maximum):
+        value = config[name]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{name} must be a number")
+        try:
+            finite = math.isfinite(float(value))
+        except (OverflowError, ValueError):
+            finite = False
+        if not finite or value < minimum or value > maximum:
+            raise ValueError(f"{name} must be between {minimum} and {maximum}")
+
+    def bounded_integer(name, minimum, maximum):
+        value = config[name]
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"{name} must be an integer")
+        if value < minimum or value > maximum:
+            raise ValueError(f"{name} must be between {minimum} and {maximum}")
+
+    bounded_number("poll_interval_s", 0.1, 60.0)
+    bounded_number("victim_pps", 0.0, 10_000_000.0)
+    if config["victim_pps"] == 0:
+        raise ValueError("victim_pps must be greater than zero")
+    bounded_number("source_pps", 0.0, 10_000_000.0)
+    if config["source_pps"] == 0:
+        raise ValueError("source_pps must be greater than zero")
+    bounded_integer("consecutive_windows", 1, 1000)
+    # OpenFlow 1.3 encodes hard_timeout as an unsigned 16-bit field.
+    bounded_integer("mitigation_hard_timeout_s", 1, 65535)
+
+    protected = config["protected_sources"]
+    if not isinstance(protected, list) or any(not isinstance(source, str) for source in protected):
+        raise ValueError("protected_sources must be a list of lab IPv4 addresses")
+    if len(protected) != len(set(protected)) or not set(protected) <= LAB_IPS:
+        raise ValueError("protected_sources must contain unique lab IPv4 addresses")
+    eligible_sources = LAB_IPS - {VICTIM_IP, CLIENT_IP} - set(protected)
+    bounded_integer("min_sources", 1, len(LAB_IPS) - 2)
+    if config["min_sources"] > len(eligible_sources):
+        raise ValueError("min_sources exceeds the number of unprotected attack hosts")
+    return config
+
+
+def load_config(path):
+    """Load and validate the controller configuration with a useful error."""
+    try:
+        config = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot read detector configuration at {path}: {exc}") from exc
+    return validate_config(config)
+
+
+def forwarding_match_fields(eth_type, in_port, source_mac, destination_mac, ip_packet,
+                            udp_packet=None, arp_packet=None):
     """Return (priority, cookie, match fields) for a known unicast packet."""
     common = {"in_port": in_port, "eth_src": source_mac, "eth_dst": destination_mac}
     if eth_type == ether_types.ETH_TYPE_ARP:
-        return PRIORITY_CONTROL, COOKIE_CONTROL, {**common, "eth_type": eth_type}
+        if arp_packet is None:
+            return None
+        return PRIORITY_CONTROL, COOKIE_CONTROL, {
+            **common,
+            "eth_type": eth_type,
+            "arp_op": arp_packet.opcode,
+            "arp_spa": arp_packet.src_ip,
+            "arp_sha": arp_packet.src_mac.lower(),
+        }
     if eth_type == ether_types.ETH_TYPE_IP and ip_packet is not None:
         if ip_packet.proto == 17:  # UDP: count each source/destination separately.
-            return PRIORITY_UDP, COOKIE_UDP, {
+            if udp_packet is None:
+                return None
+            protected_service = ip_packet.dst == VICTIM_IP and udp_packet.dst_port == VICTIM_PORT
+            return (PRIORITY_UDP if protected_service else PRIORITY_CONTROL,
+                    COOKIE_UDP if protected_service else COOKIE_CONTROL, {
                 **common,
                 "eth_type": eth_type,
                 "ip_proto": 17,
                 "ipv4_src": ip_packet.src,
                 "ipv4_dst": ip_packet.dst,
-            }
+                "udp_dst": udp_packet.dst_port,
+            })
         if ip_packet.proto == 1:  # ICMP for connectivity checks.
             return PRIORITY_CONTROL, COOKIE_CONTROL, {
                 **common,
@@ -89,7 +181,7 @@ class ForwardingController(app_manager.OSKenApp):
         self.active_blocks = {}
         self.pending_replies = {}
         self.pending_barriers = {}
-        self.config = json.loads(Path(os.environ.get("FLOWGUARD_CONFIG", DEFAULT_CONFIG)).read_text())
+        self.config = load_config(os.environ.get("FLOWGUARD_CONFIG", DEFAULT_CONFIG))
         self.mitigation_enabled = os.environ.get("FLOWGUARD_MITIGATION", "1") != "0"
         self.event_file = os.environ.get("FLOWGUARD_EVENTS")
         self.monitor_thread = hub.spawn(self._monitor)
@@ -103,10 +195,11 @@ class ForwardingController(app_manager.OSKenApp):
                 stream.write(json.dumps(record, sort_keys=True) + "\n")
 
     def _new_detector(self):
+        protected_sources = set(self.config["protected_sources"]) | {VICTIM_IP, CLIENT_IP}
         return TwoWindowDetector(
             self.config["victim_pps"], self.config["source_pps"],
             self.config["min_sources"], self.config["consecutive_windows"],
-            self.config.get("protected_sources", ()),
+            protected_sources,
         )
 
     def _monitor(self):
@@ -117,7 +210,8 @@ class ForwardingController(app_manager.OSKenApp):
                 request = parser.OFPFlowStatsRequest(
                     datapath, 0, ofp.OFPTT_ALL, ofp.OFPP_ANY, ofp.OFPG_ANY,
                     COOKIE_BASE, COOKIE_MASK,
-                    parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP, ip_proto=17, ipv4_dst=VICTIM_IP),
+                    parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP, ip_proto=17,
+                                    ipv4_dst=VICTIM_IP, udp_dst=VICTIM_PORT),
                 )
                 datapath.send_msg(request)
             hub.sleep(float(self.config["poll_interval_s"]))
@@ -146,6 +240,7 @@ class ForwardingController(app_manager.OSKenApp):
         ofp = datapath.ofproto
         parser = datapath.ofproto_parser
         self.mac_to_port[datapath.id] = {}
+        self._clear_pending_state(datapath.id)
         self.datapaths[datapath.id] = datapath
         self.trackers[datapath.id] = CounterTracker()
         self.detectors[datapath.id] = self._new_detector()
@@ -172,7 +267,8 @@ class ForwardingController(app_manager.OSKenApp):
             self._add_flow(
                 datapath,
                 priority=PRIORITY_PUNT,
-                match=parser.OFPMatch(eth_type=ether_types.ETH_TYPE_ARP, eth_src=mac, arp_spa=address),
+                match=parser.OFPMatch(eth_type=ether_types.ETH_TYPE_ARP, in_port=LAB_MAC_TO_PORT[mac],
+                                      eth_src=mac, arp_spa=address),
                 actions=controller_action,
                 cookie=COOKIE_PUNT,
             )
@@ -182,6 +278,7 @@ class ForwardingController(app_manager.OSKenApp):
                     priority=PRIORITY_PUNT,
                     match=parser.OFPMatch(
                         eth_type=ether_types.ETH_TYPE_IP,
+                        in_port=LAB_MAC_TO_PORT[mac],
                         eth_src=mac,
                         ipv4_src=address,
                         ip_proto=protocol,
@@ -194,6 +291,7 @@ class ForwardingController(app_manager.OSKenApp):
 
     @set_ev_cls(ofp_event.EventOFPStateChange, DEAD_DISPATCHER)
     def switch_disconnected_handler(self, ev):
+        self._clear_pending_state(ev.datapath.id)
         self.mac_to_port.pop(ev.datapath.id, None)
         self.datapaths.pop(ev.datapath.id, None)
         self.trackers.pop(ev.datapath.id, None)
@@ -201,6 +299,12 @@ class ForwardingController(app_manager.OSKenApp):
         self.drop_counters.pop(ev.datapath.id, None)
         self.active_blocks.pop(ev.datapath.id, None)
         self.logger.info("Switch disconnected: dpid=%s", ev.datapath.id)
+
+    def _clear_pending_state(self, datapath_id):
+        """Discard multipart and barrier state when a switch reconnects or leaves."""
+        for pending in (self.pending_replies, self.pending_barriers):
+            for key in [key for key in pending if key[0] == datapath_id]:
+                pending.pop(key, None)
 
     @set_ev_cls(ofp_event.EventOFPFlowStatsReply, MAIN_DISPATCHER)
     def flow_stats_handler(self, ev):
@@ -218,7 +322,8 @@ class ForwardingController(app_manager.OSKenApp):
         for stat in flows:
             fields = dict(stat.match.items())
             source = fields.get("ipv4_src")
-            if not source or fields.get("ipv4_dst") != VICTIM_IP:
+            if (not source or fields.get("ipv4_dst") != VICTIM_IP
+                    or fields.get("udp_dst") != VICTIM_PORT):
                 continue
             if stat.cookie == COOKIE_UDP:
                 identity = f"{fields.get('in_port')}:{fields.get('eth_src')}:{fields.get('eth_dst')}"
@@ -242,6 +347,10 @@ class ForwardingController(app_manager.OSKenApp):
             self._event("alert", dpid=datapath.id, victim=VICTIM_IP, **alert)
             if self.mitigation_enabled:
                 self._mitigate(datapath, alert["sources"], now)
+        elif detector.alert_active and self.mitigation_enabled:
+            # Reconcile current offenders throughout an active episode so a
+            # newly qualifying source or an expired block is handled promptly.
+            self._mitigate(datapath, detector.qualifying_sources(rates), now)
 
     def _mitigate(self, datapath, sources, now):
         parser = datapath.ofproto_parser
@@ -249,7 +358,8 @@ class ForwardingController(app_manager.OSKenApp):
         blocks = self.active_blocks[datapath.id]
         installed = []
         for source in sources:
-            if source not in LAB_IPS or source in self.config.get("protected_sources", ()):
+            if (source not in LAB_IPS or source in (VICTIM_IP, CLIENT_IP)
+                    or source in self.config.get("protected_sources", ())):
                 continue
             if blocks.get(source, 0) > now:
                 continue
@@ -297,13 +407,43 @@ class ForwardingController(app_manager.OSKenApp):
         destination_mac = eth.dst.lower()
         if source_mac not in LAB_MAC_TO_IP:
             return
+        if in_port != LAB_MAC_TO_PORT[source_mac]:
+            self.logger.warning("Ignoring host identity on unexpected port: %s from %s", source_mac, in_port)
+            return
 
         ip_packet = frame.get_protocol(ipv4.ipv4)
+        udp_packet = frame.get_protocol(udp.udp)
+        arp_packet = frame.get_protocol(arp.arp)
         if eth.ethertype == ether_types.ETH_TYPE_IP:
             if ip_packet is None or ip_packet.src != LAB_MAC_TO_IP[source_mac] or ip_packet.dst not in LAB_IPS:
                 return
-        elif frame.get_protocol(arp.arp) is None:
-            return
+            # IPv4 destinations in this lab are unicast hosts. Reject Ethernet
+            # group destinations and IP/MAC disagreement before any packet-out.
+            if (int(destination_mac.split(":", 1)[0], 16) & 1
+                    or destination_mac != LAB_IP_TO_MAC[ip_packet.dst]):
+                return
+            if ip_packet.proto == 17 and udp_packet is None:
+                return
+        else:
+            if arp_packet is None:
+                return
+            if (arp_packet.hwtype != arp.ARP_HW_TYPE_ETHERNET
+                    or arp_packet.proto != ether_types.ETH_TYPE_IP
+                    or arp_packet.hlen != 6 or arp_packet.plen != 4
+                    or arp_packet.opcode not in (arp.ARP_REQUEST, arp.ARP_REPLY)
+                    or arp_packet.src_mac.lower() != source_mac
+                    or arp_packet.src_ip != LAB_MAC_TO_IP[source_mac]
+                    or arp_packet.dst_ip not in LAB_IPS):
+                return
+            if arp_packet.opcode == arp.ARP_REPLY:
+                expected_target = LAB_IP_TO_MAC[arp_packet.dst_ip]
+                if arp_packet.dst_mac.lower() != expected_target or destination_mac != expected_target:
+                    return
+            else:
+                expected_target = LAB_IP_TO_MAC[arp_packet.dst_ip]
+                if (arp_packet.dst_mac.lower() not in ("00:00:00:00:00:00", expected_target)
+                        or destination_mac not in ("ff:ff:ff:ff:ff:ff", expected_target)):
+                    return
 
         ports = self.mac_to_port.setdefault(datapath.id, {})
         old_port = ports.get(source_mac)
@@ -311,11 +451,19 @@ class ForwardingController(app_manager.OSKenApp):
             self.logger.warning("Ignoring unexpected MAC move: %s from %s to %s", source_mac, old_port, in_port)
             return
         ports[source_mac] = in_port
-        out_port = ports.get(destination_mac, ofp.OFPP_FLOOD)
+        if destination_mac in LAB_MAC_TO_PORT:
+            out_port = LAB_MAC_TO_PORT[destination_mac]
+        elif eth.ethertype == ether_types.ETH_TYPE_ARP:
+            out_port = ofp.OFPP_FLOOD
+        else:
+            return
+        if out_port == in_port:
+            return
         actions = [parser.OFPActionOutput(out_port)]
 
         if out_port != ofp.OFPP_FLOOD:
-            flow = forwarding_match_fields(eth.ethertype, in_port, source_mac, destination_mac, ip_packet)
+            flow = forwarding_match_fields(eth.ethertype, in_port, source_mac, destination_mac,
+                                           ip_packet, udp_packet, arp_packet)
             if flow is not None:
                 priority, cookie, fields = flow
                 self._add_flow(

@@ -1,0 +1,28 @@
+{
+  "platform": "macOS-27.0-arm64-arm-64bit-Mach-O",
+  "python": "3.14.6",
+  "checks": [
+    {
+      "check": "Python",
+      "passed": true,
+      "detail": "3.14.6 (3.12+ required)"
+    },
+    {
+      "check": "Offline files",
+      "passed": true,
+      "detail": "dashboard, fonts, D3 and traffic scripts present"
+    },
+    {
+      "check": "Detector and recorded data",
+      "passed": true,
+      "detail": "2 historical trials load; model computes"
+    },
+    {
+      "check": "Live UDP ports",
+      "passed": true,
+      "detail": "19000/19001/19002/19011/19021/19022 available"
+    }
+  ],
+  "passed": true,
+  "capture_tool": null
+}

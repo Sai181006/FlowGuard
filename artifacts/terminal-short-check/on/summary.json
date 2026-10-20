@@ -1,0 +1,83 @@
+{
+  "execution_status": "completed",
+  "started_utc": "2026-10-20T16:15:53.084700+00:00",
+  "provenance": "Real localhost UDP; Python gateway enforcement, not OpenFlow",
+  "mitigation": true,
+  "pps_per_source": 600,
+  "attack_duration_s": 4,
+  "config": {
+    "poll_interval_s": 1.0,
+    "victim_pps": 100.0,
+    "source_pps": 30.0,
+    "min_sources": 2,
+    "consecutive_windows": 2,
+    "protected_sources": [
+      "10.0.0.11"
+    ],
+    "mitigation_hard_timeout_s": 10
+  },
+  "ports": {
+    "victim": 19000,
+    "gateway": 19001,
+    "backend": 19002,
+    "client": 19011,
+    "a1": 19021,
+    "a2": 19022
+  },
+  "logical_identity_mapping": {
+    "client": "10.0.0.11",
+    "a1": "10.0.0.21",
+    "a2": "10.0.0.22"
+  },
+  "on_wire_address": "127.0.0.1",
+  "platform": "darwin",
+  "measurement_started_utc": "2026-10-20T16:15:53.121698+00:00",
+  "finished_utc": "2026-10-20T16:16:12.825787+00:00",
+  "sources": {
+    "client": {
+      "logical_ip": "10.0.0.11",
+      "offered": 190,
+      "forwarded": 190,
+      "dropped": 0,
+      "victim_echo_replies": 190,
+      "recovery_echo_replies": 26
+    },
+    "a1": {
+      "logical_ip": "10.0.0.21",
+      "offered": 2408,
+      "forwarded": 1209,
+      "dropped": 1199,
+      "victim_echo_replies": 1209,
+      "recovery_echo_replies": 4
+    },
+    "a2": {
+      "logical_ip": "10.0.0.22",
+      "offered": 2408,
+      "forwarded": 1209,
+      "dropped": 1199,
+      "victim_echo_replies": 1209,
+      "recovery_echo_replies": 4
+    }
+  },
+  "first_alert_s": 4.001890917003038,
+  "alerts": 1,
+  "client": {
+    "sent": 190,
+    "expected": 190,
+    "received": 190,
+    "mean_rtt_ms": 0.504942105263158
+  },
+  "gateway_errors": {},
+  "checks": {
+    "complete_client_csv": true,
+    "protected_client_all_replied": true,
+    "two_source_alert": true,
+    "expected_filtering": true,
+    "protected_client_never_dropped": true,
+    "rules_expired": true,
+    "source_recovery": true,
+    "no_gateway_errors": true,
+    "every_forward_received_echo": true
+  },
+  "validation_status": "passed"
+}

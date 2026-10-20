@@ -1,0 +1,34 @@
+FLOWGUARD - OFFLINE WINDOWS DEMO
+
+1. Extract the entire ZIP, then open the extracted FlowGuard folder.
+2. Have Python 3.12 or newer installed before going offline.
+3. Double-click Start FlowGuard.cmd for the dashboard.
+4. Double-click Terminal Demo.cmd for the complete step-by-step terminal demo.
+
+No pip packages, Linux, WSL or VM installation is needed for these native demos.
+Do not copy or use the Mac's virtual environment on Windows.
+
+Before presenting, open PowerShell here and run:
+  py -3 demo/terminal.py --doctor
+  py -3 -m unittest tests.test_detection tests.test_demo_engine tests.test_live_lab -v
+  py -3 demo/live_lab.py
+
+If py is unavailable, use python or scripts\python-windows.cmd instead.
+
+For Wireshark, use Npcap's "Adapter for loopback traffic capture".
+Full capture filters, I/O graph filters, terminal commands and an eight-minute
+presentation script are in WINDOWS_DEMO.md.
+
+Evidence boundaries:
+  Dashboard model = generated counters and illustrative capacity assumptions.
+  Native live lab = real UDP, original detector/echo/probe, Python gateway drops.
+  Original SDN = Mininet/OVS/OS-Ken, requires an EXISTING working Linux lab.
+
+The native runtime was checked on macOS, including Python 3.12 compatibility.
+Native Windows, Npcap and a live OVS integration test still require rehearsal
+on those systems. Existing Mac test evidence is under artifacts/terminal-verified.
+No PCAP is bundled; packet capture was denied by this Mac's capture permissions.
+
+Read PROJECT_EXPLAINED.md for the simple project explanation and protocols.
+Read VALIDATION.md for exactly what has been tested.
+The original GitHub repository does not yet contain these unpublished local changes.

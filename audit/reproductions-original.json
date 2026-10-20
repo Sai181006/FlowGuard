@@ -1,0 +1,36 @@
+{
+  "protected_identity_takeover": {
+    "protected_client_learned_on_attacker_port": 3,
+    "real_client_packet_rejected": true
+  },
+  "broad_arp_rule": {
+    "learned_arp_match": {
+      "in_port": 3,
+      "eth_src": "02:00:00:00:00:21",
+      "eth_dst": "02:00:00:00:00:10",
+      "eth_type": 2054
+    },
+    "sender_ip_and_hardware_address_unchecked": true
+  },
+  "uncounted_broadcast_udp": {
+    "forwarded_udp_packets": 2,
+    "destination_mac": "ff:ff:ff:ff:ff:ff",
+    "attributable_udp_flows_installed": 0
+  },
+  "udp_service_mismatch": {
+    "observed_attack_udp_port": 9001,
+    "installed_drop_udp_ports": [
+      9000,
+      9000
+    ]
+  },
+  "repeat_analysis_failure": {
+    "missing_file_requested": "attack-a1.jsonl",
+    "actual_file": "attack-a1-wave1.jsonl"
+  },
+  "failed_probes_reported_complete": {
+    "client_probe_exit": 1,
+    "recovery_probe_exit": 1,
+    "recorded_trial_status": "completed"
+  }
+}

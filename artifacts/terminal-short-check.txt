@@ -1,0 +1,44 @@
+
+FLOWGUARD | LIVE LOCALHOST LAB
+Real UDP sockets + original detector, echo server and probe.
+Enforcement: Python gateway. This run does not install OpenFlow rules.
+Wire: 127.0.0.1 only. Logical host identities are mapped from source ports.
+client :19011 -> gateway :19001 -> backend :19002 -> victim :19000
+a1     :19021 -^   a2 :19022 -^
+Phases: 2s normal -> bounded attack -> rule-expiry wait -> 2s recovery.
+A local PCAP requires Wireshark/Npcap or another real capture tool.
+
+
+=== MITIGATION ON ===
+       time   phase         forwarded/s  dropped total  active rules
+  [  0.00s] phase: {"name": "baseline"}
+      1.00   baseline            14.0              0             0
+  [  2.00s] phase: {"name": "attack"}
+      2.00   attack              16.0              0             0
+      3.00   attack            1206.9              0             0
+  [  4.00s] alert: {"sources": {"10.0.0.21": 600.9568561025343, "10.0.0.22": 600.9568561025343}, "victim_pps": 1211.9129943365583}
+  [  4.00s] gateway_drop_installed: {"source": "10.0.0.21", "timeout_s": 10, "enforcement": "Python userspace UDP gateway"}
+  [  4.00s] gateway_drop_installed: {"source": "10.0.0.22", "timeout_s": 10, "enforcement": "Python userspace UDP gateway"}
+      4.00   attack            1211.9              0             2
+      5.00   attack              10.0           1200             2
+  [  6.00s] phase: {"name": "expiry-wait"}
+      6.00   expiry-wait          9.0           2398             2
+      7.00   expiry-wait         10.0           2398             2
+      8.00   expiry-wait         10.0           2398             2
+      9.01   expiry-wait          9.0           2398             2
+     10.01   expiry-wait         10.0           2398             2
+     11.01   expiry-wait         10.0           2398             2
+     12.01   expiry-wait          9.0           2398             2
+     13.01   expiry-wait         10.0           2398             2
+  [ 14.00s] rule_expired: {"source": "10.0.0.21"}
+  [ 14.00s] rule_expired: {"source": "10.0.0.22"}
+     14.01   expiry-wait         10.0           2398             0
+     15.01   expiry-wait          9.0           2398             0
+     16.01   expiry-wait         10.0           2398             0
+  [ 17.00s] phase: {"name": "recovery"}
+     17.01   recovery            12.0           2398             0
+     18.01   recovery            13.0           2398             0
+     19.01   recovery            12.0           2398             0
+  [ 19.70s] finished: {"validation_status": "passed", "checks": {"complete_client_csv": true, "protected_client_all_replied": true, "two_source_alert": true, "expected_filtering": true, "protected_client_never_dropped": true, "rules_expired": true, "source_recovery": true, "no_gateway_errors": true, "every_forward_received_echo": true}}
+
+  PASSED: client 190/190; observed gateway drops 2,398; evidence: artifacts/terminal-short-check/on
