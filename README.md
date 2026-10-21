@@ -2,6 +2,8 @@
 
 FlowGuard demonstrates a two-source UDP flood in a **private Mininet network**. An OS-Ken controller polls Open vSwitch counters, attributes the flood to its sources, and installs 10-second OpenFlow drop rules for those sources while a legitimate client keeps probing the same victim service.
 
+For a start-to-finish explanation of the network, detector, rules, evidence, and review presentation, read the [complete project guide](docs/PROJECT_EXPLAINED.md).
+
 ## Review in one command
 
 Follow [the setup and live demo guide](docs/DEMO.md), then run this from the repository root in Ubuntu WSL:
