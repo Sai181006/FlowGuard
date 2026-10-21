@@ -7,3 +7,7 @@ __pycache__/
 results/demo-*/
 results/review-*/
 results/m7-*/
+results/m8-*/
+results/native-*/
+artifacts/terminal-runs/*/
+!artifacts/terminal-runs/20261020-214223-268960/

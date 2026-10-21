@@ -10,7 +10,10 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from analyze import summarize_trial
+EXPERIMENTS = str(Path(__file__).resolve().parent)
+if EXPERIMENTS not in sys.path:
+    sys.path.insert(0, EXPERIMENTS)
+from analyze import summarize_trial  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[1]

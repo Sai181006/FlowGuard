@@ -5,6 +5,7 @@ import csv
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import time
@@ -14,7 +15,10 @@ from pathlib import Path
 from mininet.net import Mininet
 from mininet.node import OVSSwitch, RemoteController
 
-from packet_capture import PacketCapture, save_summary, switch_ports
+EXPERIMENTS = str(Path(__file__).resolve().parent)
+if EXPERIMENTS not in sys.path:  # also importable as experiments.run_trial (tests)
+    sys.path.insert(0, EXPERIMENTS)
+from packet_capture import PacketCapture, save_summary, switch_ports  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "topology"))
 from lab_topology import DDoSTopo  # noqa: E402
@@ -23,6 +27,7 @@ from lab_topology import DDoSTopo  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 MODES = ("detection", "mitigation", "mitigation-repeat", "baseline", "attack-off", "attack-on")
 PROBE_COLUMNS = ("timestamp_utc", "sequence", "status", "rtt_ms")
+SUMMARY_LINE = re.compile(r"^(sent=\d+ received=\d+ loss=|metrics )")
 
 
 def utc_now():
@@ -62,6 +67,10 @@ def probe_measurement(path, expected_count, returncode):
             rows = list(reader)
     except (OSError, csv.Error) as exc:
         raise ValueError(f"cannot read probe output at {path}: {exc}") from exc
+    # probe.py writes its summary ("sent=N received=N loss=X%", optionally
+    # followed by a "metrics ..." line) to stderr, which shares this file.
+    while rows and SUMMARY_LINE.match(rows[-1].get("timestamp_utc") or ""):
+        rows.pop()
     if len(rows) != expected_count:
         raise ValueError(f"probe output at {path} contains {len(rows)} of {expected_count} samples")
 

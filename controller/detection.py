@@ -51,6 +51,10 @@ class CounterTracker:
 
 
 class TwoWindowDetector:
+    """Fixed thresholds: victim rate and per-source rate high for N consecutive windows."""
+
+    name = "threshold"
+
     def __init__(self, victim_pps, source_pps, min_sources=2, consecutive_windows=2, protected_sources=()):
         self.victim_pps = victim_pps
         self.source_pps = source_pps
@@ -63,6 +67,11 @@ class TwoWindowDetector:
     def reset(self):
         self.high_windows = 0
         self.alert_active = False
+
+    def state(self):
+        """JSON-safe diagnostics for logs and the dashboard."""
+        return {"detector": self.name, "high_windows": self.high_windows,
+                "alert_active": self.alert_active}
 
     def qualifying_sources(self, rates):
         """Return current sources over threshold, excluding protected hosts."""

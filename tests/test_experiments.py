@@ -69,6 +69,10 @@ class TrialValidationTests(unittest.TestCase):
                     status = "ok" if sequence <= received else "timeout"
                     rtt = "1.250" if status == "ok" else ""
                     stdout.write(f"2026-10-20T00:00:00+00:00,{sequence},{status},{rtt}\n")
+                # The real probe writes this summary to stderr, which run_trial
+                # redirects into the same CSV file.
+                stdout.write(f"sent={count} received={received} "
+                             f"loss={100 * (count - received) / count:.1f}%\n")
                 return TrialValidationTests.Process(0 if received == count else 1)
             if "flood.py" in command[2]:
                 stdout.write(json.dumps({"event": "start", "monotonic_s": 1.0}) + "\n")
@@ -179,6 +183,23 @@ class TrialValidationTests(unittest.TestCase):
                             "2026-10-20T00:00:00+00:00,1,ok,1.0\n", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "contains 1 of 2 samples"):
                 run_trial.probe_measurement(path, 2, 0)
+
+    def test_probe_parser_ignores_trailing_summary_lines_from_stderr(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "probe.csv"
+            path.write_text("timestamp_utc,sequence,status,rtt_ms\n"
+                            "2026-10-20T00:00:00+00:00,1,ok,1.0\n"
+                            "2026-10-20T00:00:00+00:00,2,timeout,\n"
+                            "sent=2 received=1 loss=50.0%\n"
+                            "metrics p50=1.000 p95=1.000 p99=1.000 jitter=0.000\n", encoding="utf-8")
+            measurement = run_trial.probe_measurement(path, 2, 1)
+            self.assertEqual(measurement["received"], 1)
+            path.write_text("timestamp_utc,sequence,status,rtt_ms\n"
+                            "2026-10-20T00:00:00+00:00,1,ok,1.0\n"
+                            "unexpected,row,here,\n"
+                            "sent=1 received=1 loss=0.0%\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "contains 2 of 1 samples"):
+                run_trial.probe_measurement(path, 1, 0)
 
 
 class TrialAnalysisTests(unittest.TestCase):
