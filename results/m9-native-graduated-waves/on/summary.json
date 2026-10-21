@@ -1,0 +1,303 @@
+{
+  "execution_status": "completed",
+  "started_utc": "2026-10-21T16:32:45.652431+00:00",
+  "provenance": "Real localhost UDP; Python gateway enforcement, not OpenFlow",
+  "mitigation": true,
+  "pps_per_source": 600,
+  "attack_duration_s": 8,
+  "config": {
+    "detector": "threshold",
+    "detectors": {
+      "ewma": {
+        "alpha": 0.2,
+        "k_sigma": 4.0,
+        "sigma_floor_pps": 2.0,
+        "min_rate_pps": 20.0,
+        "warmup_windows": 3,
+        "min_sources": 1
+      },
+      "cusum": {
+        "alpha": 0.2,
+        "drift_k": 0.5,
+        "threshold_h": 6.0,
+        "z_clip": 4.0,
+        "sigma_floor_pps": 2.0,
+        "min_rate_pps": 20.0,
+        "warmup_windows": 3,
+        "min_sources": 1
+      },
+      "entropy": {
+        "alpha": 0.2,
+        "kl_threshold_bits": 0.5,
+        "share_delta": 0.1,
+        "min_victim_pps": 50.0,
+        "smoothing_pps": 0.5,
+        "warmup_windows": 3,
+        "min_sources": 1
+      }
+    },
+    "mitigation": {
+      "action": "graduated",
+      "rate_limit_pps": 20,
+      "rate_limit_burst_packets": 20,
+      "graduated_drop_after": 2,
+      "backoff": {
+        "enabled": true,
+        "factor": 2.0,
+        "max_timeout_s": 80,
+        "memory_s": 120
+      }
+    },
+    "poll_interval_s": 1.0,
+    "victim_pps": 100.0,
+    "source_pps": 30.0,
+    "min_sources": 2,
+    "consecutive_windows": 2,
+    "protected_sources": [
+      "10.0.0.11"
+    ],
+    "mitigation_hard_timeout_s": 10
+  },
+  "ports": {
+    "victim": 19000,
+    "gateway": 19001,
+    "backend": 19002,
+    "client": 19011,
+    "a1": 19021,
+    "a2": 19022
+  },
+  "logical_identity_mapping": {
+    "client": "10.0.0.11",
+    "a1": "10.0.0.21",
+    "a2": "10.0.0.22"
+  },
+  "on_wire_address": "127.0.0.1",
+  "platform": "linux",
+  "detector": "threshold",
+  "response_action": "graduated",
+  "backoff_enabled": true,
+  "waves": 3,
+  "wave_gap_s": 6,
+  "baseline_s": 2,
+  "phase_plan": [
+    {
+      "phase": "baseline",
+      "start_s": 0.0,
+      "end_s": 2.0,
+      "wave": 0
+    },
+    {
+      "phase": "attack",
+      "start_s": 2.0,
+      "end_s": 10.0,
+      "wave": 1
+    },
+    {
+      "phase": "gap",
+      "start_s": 10.0,
+      "end_s": 16.0,
+      "wave": 1
+    },
+    {
+      "phase": "attack",
+      "start_s": 16.0,
+      "end_s": 24.0,
+      "wave": 2
+    },
+    {
+      "phase": "gap",
+      "start_s": 24.0,
+      "end_s": 30.0,
+      "wave": 2
+    },
+    {
+      "phase": "attack",
+      "start_s": 30.0,
+      "end_s": 38.0,
+      "wave": 3
+    },
+    {
+      "phase": "expiry-wait",
+      "start_s": 38.0,
+      "end_s": 79.0,
+      "wave": 0
+    },
+    {
+      "phase": "recovery",
+      "start_s": 79.0,
+      "end_s": null,
+      "wave": 0
+    }
+  ],
+  "probe_mode": "stream",
+  "bottleneck": {
+    "model": "emulated D/1 egress link in the Python gateway (userspace, not a kernel qdisc)",
+    "service_pps": 300.0,
+    "queue_packets": 50,
+    "discipline": "fifo",
+    "red": null,
+    "max_catch_up_s": 0.02
+  },
+  "measurement_started_utc": "2026-10-21T16:32:45.715244+00:00",
+  "finished_utc": "2026-10-21T16:34:06.925566+00:00",
+  "sources": {
+    "client": {
+      "logical_ip": "10.0.0.11",
+      "offered": 810,
+      "forwarded": 810,
+      "dropped": 0,
+      "rate_limit_passed": 0,
+      "rate_limit_dropped": 0,
+      "queue_dropped": 37,
+      "delivered_to_victim": 773,
+      "offenses": 0,
+      "victim_echo_replies": 773,
+      "recovery_echo_replies": 20
+    },
+    "a1": {
+      "logical_ip": "10.0.0.21",
+      "offered": 14430,
+      "forwarded": 2562,
+      "dropped": 11868,
+      "rate_limit_passed": 147,
+      "rate_limit_dropped": 3461,
+      "queue_dropped": 1183,
+      "delivered_to_victim": 1379,
+      "offenses": 2,
+      "victim_echo_replies": 1379,
+      "recovery_echo_replies": 4
+    },
+    "a2": {
+      "logical_ip": "10.0.0.22",
+      "offered": 14430,
+      "forwarded": 2562,
+      "dropped": 11868,
+      "rate_limit_passed": 147,
+      "rate_limit_dropped": 3461,
+      "queue_dropped": 2358,
+      "delivered_to_victim": 204,
+      "offenses": 2,
+      "victim_echo_replies": 204,
+      "recovery_echo_replies": 4
+    }
+  },
+  "first_alert_s": 4.001555258997541,
+  "alerts": 2,
+  "client": {
+    "sent": 810,
+    "expected": 810,
+    "received": 773,
+    "mean_rtt_ms": 5.302379042690815,
+    "metrics": {
+      "sent": 810,
+      "received": 773,
+      "loss_percent": 4.568,
+      "late": null,
+      "duplicates": null,
+      "reordered": null,
+      "max_consecutive_loss": 11,
+      "rtt_ms": {
+        "min": 3.57,
+        "mean": 5.302,
+        "p50": 4.288,
+        "p95": 4.885,
+        "p99": 5.478,
+        "max": 166.289
+      },
+      "jitter_ms_rfc3550": 0.224
+    },
+    "phases": {
+      "baseline": {
+        "sent": 20,
+        "received": 20,
+        "loss_percent": 0.0,
+        "rtt_ms": {
+          "p50": 4.239,
+          "p95": 4.52,
+          "max": 4.563
+        },
+        "jitter_ms_rfc3550": 0.184
+      },
+      "attack": {
+        "sent": 240,
+        "received": 203,
+        "loss_percent": 15.417,
+        "rtt_ms": {
+          "p50": 4.32,
+          "p95": 5.292,
+          "max": 166.289
+        },
+        "jitter_ms_rfc3550": 0.33
+      },
+      "gap": {
+        "sent": 120,
+        "received": 120,
+        "loss_percent": 0.0,
+        "rtt_ms": {
+          "p50": 4.283,
+          "p95": 4.95,
+          "max": 5.282
+        },
+        "jitter_ms_rfc3550": 0.288
+      },
+      "expiry-wait": {
+        "sent": 410,
+        "received": 410,
+        "loss_percent": 0.0,
+        "rtt_ms": {
+          "p50": 4.26,
+          "p95": 4.759,
+          "max": 5.181
+        },
+        "jitter_ms_rfc3550": 0.198
+      },
+      "recovery": {
+        "sent": 20,
+        "received": 20,
+        "loss_percent": 0.0,
+        "rtt_ms": {
+          "p50": 4.372,
+          "p95": 4.78,
+          "max": 4.8
+        },
+        "jitter_ms_rfc3550": 0.164
+      }
+    }
+  },
+  "queue": {
+    "enqueued": 2356,
+    "dequeued": 2356,
+    "tail_drops": 3578,
+    "red_drops": 0,
+    "max_depth": 50,
+    "delay_ms": {
+      "p50": 163.924,
+      "p95": 166.47,
+      "max": 166.625
+    },
+    "red_avg": null,
+    "drops_by_source": {
+      "10.0.0.21": 1183,
+      "10.0.0.22": 2358,
+      "10.0.0.11": 37
+    },
+    "attack_delay_ms": {
+      "p50": 165.735,
+      "p95": 166.508
+    }
+  },
+  "gateway_errors": {},
+  "checks": {
+    "complete_client_csv": true,
+    "client_loss_measured": true,
+    "client_recovery_all_replied": true,
+    "two_source_alert": true,
+    "expected_filtering": true,
+    "protected_client_never_dropped": true,
+    "rules_expired": true,
+    "source_recovery": true,
+    "no_gateway_errors": true,
+    "every_forward_received_echo": true
+  },
+  "validation_status": "passed"
+}
