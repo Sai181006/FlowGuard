@@ -1,0 +1,5 @@
+# Python packages for unit tests, the controller, and chart generation.
+# Mininet's mnexec, Open vSwitch, and network namespaces require Linux.
+os-ken==4.1.1
+mininet==2.3.0.dev6
+Pillow>=12,<13

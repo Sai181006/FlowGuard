@@ -64,11 +64,15 @@ class TwoWindowDetector:
         self.high_windows = 0
         self.alert_active = False
 
-    def observe(self, rates):
-        sources = {
+    def qualifying_sources(self, rates):
+        """Return current sources over threshold, excluding protected hosts."""
+        return {
             source: rate for source, rate in rates["source_pps"].items()
             if source not in self.protected_sources and rate > self.source_pps
         }
+
+    def observe(self, rates):
+        sources = self.qualifying_sources(rates)
         high = rates["victim_pps"] > self.victim_pps and len(sources) >= self.min_sources
         if not high:
             self.reset()

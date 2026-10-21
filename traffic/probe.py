@@ -25,12 +25,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", type=lab_address, default="10.0.0.10")
     parser.add_argument("--port", type=int, default=9000)
+    parser.add_argument("--source-port", type=int, default=0,
+                        help="Optional fixed local UDP port for packet-capture demonstrations")
     parser.add_argument("--count", type=int, default=10)
     parser.add_argument("--interval-ms", type=int, default=100)
     parser.add_argument("--timeout-ms", type=int, default=500)
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error("port must be between 1 and 65535")
+    if not 0 <= args.source_port <= 65535:
+        parser.error("source-port must be between 0 and 65535")
     if not 1 <= args.count <= 1000:
         parser.error("count must be between 1 and 1000")
     if not 50 <= args.interval_ms <= 60000:
@@ -41,6 +45,8 @@ def main():
     received = 0
     print("timestamp_utc,sequence,status,rtt_ms", flush=True)
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        if args.source_port:
+            sock.bind(("0.0.0.0", args.source_port))
         for sequence in range(1, args.count + 1):
             started = time.monotonic()
             timestamp = datetime.now(timezone.utc).isoformat()

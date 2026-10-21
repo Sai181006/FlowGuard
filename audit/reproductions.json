@@ -1,0 +1,19 @@
+{
+  "status": "passed",
+  "purpose": "Current regression checks verify hardening and experiment-integrity behavior.",
+  "historical_note": "The original audit proofs describe the earlier upstream code and are preserved in audit/reproductions-original.json.",
+  "scope": "Mocked OpenFlow messages, saved experiment artifacts, and local dashboard HTTP checks; no live switch or attack traffic.",
+  "checks": {
+    "security": {
+      "status": "passed",
+      "tests_run": 32,
+      "failures": []
+    },
+    "experiment_integrity": {
+      "status": "passed",
+      "tests_run": 9,
+      "failures": []
+    }
+  },
+  "total_tests": 41
+}

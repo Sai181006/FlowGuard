@@ -1,0 +1,190 @@
+
+FLOWGUARD PREFLIGHT | Darwin arm64
+  PASS | Python: 3.12.11 (3.12+ required)
+  PASS | Offline files: dashboard, fonts, D3 and traffic scripts present
+  PASS | Detector and recorded data: 2 historical trials load; model computes
+  PASS | Live UDP ports: 19000/19001/19002/19011/19021/19022 available
+  INFO | Capture tool: not found; optional for the terminal lab
+  INFO | Packet capture requires a separate capture tool and its driver/permissions.
+  INFO | No Linux, WSL, VM, drivers or Python packages are installed by this check.
+  INFO | Native enforcement uses Python; original OpenFlow requires an existing SDN lab.
+
+====================================================================
+1 | WHY TWO WINDOWS? Actual detector with explained counter inputs
+====================================================================
+
+DETECTOR WALKTHROUGH — simulated counters, actual detection code
+Victim threshold: >100 packets/s; source threshold: >30 packets/s; at least 2 sources for 2 consecutive windows.
+Protected client: 10.0.0.11. Each simulated window is one second.
+
+1. Normal traffic
+   a1=2  a2=2  client=10 packets/s
+   victim=14 packets/s; high-window count=0; alert=no
+
+2. One-window burst
+   a1=70  a2=70  client=10 packets/s
+   victim=150 packets/s; high-window count=1; alert=no
+
+3. Traffic returns to normal
+   a1=2  a2=2  client=10 packets/s
+   victim=14 packets/s; high-window count=0; alert=no
+
+4. Sustained flood: first high window
+   a1=600  a2=600  client=10 packets/s
+   victim=1210 packets/s; high-window count=1; alert=no
+
+5. Sustained flood: second high window
+   a1=600  a2=600  client=10 packets/s
+   victim=1210 packets/s; high-window count=2; alert=YES
+   Offenders: 10.0.0.21, 10.0.0.22
+   Controller policy: drop their UDP to 10.0.0.10:9000 for 10 seconds.
+   This walkthrough computes decisions; it does not install switch rules.
+
+6. Counter input after modeled drops
+   a1=0  a2=0  client=10 packets/s
+   victim=10 packets/s; high-window count=0; alert=no
+
+7. Second flood: first high window
+   a1=600  a2=600  client=10 packets/s
+   victim=1210 packets/s; high-window count=1; alert=no
+
+8. Second flood: detector rearms
+   a1=600  a2=600  client=10 packets/s
+   victim=1210 packets/s; high-window count=2; alert=YES
+   Offenders: 10.0.0.21, 10.0.0.22
+   Controller policy: drop their UDP to 10.0.0.10:9000 for 10 seconds.
+   This walkthrough computes decisions; it does not install switch rules.
+
+Observed: a short burst did not alert; sustained traffic alerted; a low window rearmed detection.
+
+====================================================================
+2 | ORIGINAL SDN EVIDENCE: Recalculate the saved experiment
+====================================================================
+
+RECORDED SDN EXPERIMENT — original raw data from 13 October 2026
+Two sources at 600 packets/s each; 8-second traffic phase.
+Baseline alerts: 0
+First detection: 1.555 seconds
+First barrier reply (saved as drop_confirmed): 1.634 seconds
+Compared victim-received attacker rate with mitigation off: 1199.96 packets/s
+Compared victim-received attacker rate with mitigation on:  0.00 packets/s
+Comparison starts 2.134 seconds after attack start.
+Legitimate probes, off: 80/80
+Legitimate probes, on:  80/80
+Drop rules remaining after recovery: 0
+These recorded results show filtering in the original lab. Both modes had zero client loss,
+so they do not establish improved availability under saturation.
+Chart: results/m6-rate-comparison.png
+Raw evidence: controller.jsonl, victim.jsonl, client.csv, flows-during.txt in each trial folder.
+
+ACTUAL SAVED OPENFLOW RULES (historical, not installed by this command):
+  cookie=0xdd05000000000005, duration=2.367s, table=0, n_packets=1287, n_bytes=218790, hard_timeout=10, send_flow_rem priority=200,udp,nw_src=10.0.0.21,nw_dst=10.0.0.10,tp_dst=9000 actions=drop
+  cookie=0xdd05000000000005, duration=2.341s, table=0, n_packets=1217, n_bytes=206890, hard_timeout=10, send_flow_rem priority=200,udp,nw_src=10.0.0.22,nw_dst=10.0.0.10,tp_dst=9000 actions=drop
+Read one rule: priority 200 overrides forwarding; UDP source + victim + port 9000
+select the service; actions=drop discards it; hard_timeout=10 removes it after 10s.
+n_packets is the switch's saved match counter. No client-source drop rule appears.
+A barrier acknowledges ordering. The saved flow table and victim measurements
+supply additional evidence of filtering; the barrier alone is insufficient.
+
+SELECTED SAVED CONTROLLER EVENTS:
+  {"dpid": 1, "monotonic_s": 214.89719676, "sources": {"10.0.0.21": 641.5001116794712, "10.0.0.22": 642.4993330372273}, "time_utc": "2026-10-13T17:12:39.599771+00:00", "type": "alert", "victim": "10.0.0.10", "victim_pps": 1294.9908796520165}
+  {"dpid": 1, "hard_timeout_s": 10, "monotonic_s": 214.92300389, "port": 9000, "source": "10.0.0.21", "time_utc": "2026-10-13T17:12:39.625576+00:00", "type": "drop_requested", "victim": "10.0.0.10"}
+  {"dpid": 1, "hard_timeout_s": 10, "monotonic_s": 214.948690588, "port": 9000, "source": "10.0.0.22", "time_utc": "2026-10-13T17:12:39.651264+00:00", "type": "drop_requested", "victim": "10.0.0.10"}
+  {"dpid": 1, "monotonic_s": 214.976142541, "sources": ["10.0.0.21", "10.0.0.22"], "time_utc": "2026-10-13T17:12:39.678717+00:00", "type": "drop_confirmed"}
+
+====================================================================
+3 | REAL LOCALHOST PACKETS: Start your Wireshark capture now
+====================================================================
+
+FLOWGUARD | LIVE LOCALHOST LAB
+Real UDP sockets + original detector, echo server and probe.
+Enforcement: Python gateway. This run does not install OpenFlow rules.
+Wire: 127.0.0.1 only. Logical host identities are mapped from source ports.
+client :19011 -> gateway :19001 -> backend :19002 -> victim :19000
+a1     :19021 -^   a2 :19022 -^
+Phases: 2s normal -> bounded attack -> rule-expiry wait -> 2s recovery.
+A local PCAP requires Wireshark/Npcap or another real capture tool.
+
+
+=== MITIGATION OFF ===
+       time   phase         forwarded/s  dropped total  active rules
+  [  0.00s] phase: {"name": "baseline"}
+      1.00   baseline            14.0              0             0
+  [  2.00s] phase: {"name": "attack"}
+      2.00   attack              14.0              0             0
+      3.00   attack            1209.7              0             0
+  [  4.00s] alert: {"sources": {"10.0.0.21": 599.4857910642004, "10.0.0.22": 599.4857910642004}, "victim_pps": 1207.9638689943638}
+      4.00   attack            1208.0              0             0
+      5.00   attack            1211.1              0             0
+      6.00   attack            1211.9              0             0
+      7.00   attack            1206.2              0             0
+      8.00   attack            1211.3              0             0
+      9.00   attack            1209.6              0             0
+  [ 10.00s] phase: {"name": "expiry-wait"}
+     10.00   expiry-wait       1204.9              0             0
+     11.00   expiry-wait         10.0              0             0
+     12.01   expiry-wait         10.0              0             0
+     13.01   expiry-wait          9.0              0             0
+     14.01   expiry-wait         10.0              0             0
+     15.01   expiry-wait         10.0              0             0
+     16.01   expiry-wait          9.0              0             0
+     17.01   expiry-wait         10.0              0             0
+     18.01   expiry-wait         10.0              0             0
+     19.01   expiry-wait          9.0              0             0
+     20.01   expiry-wait         10.0              0             0
+  [ 21.00s] phase: {"name": "recovery"}
+     21.01   recovery            12.0              0             0
+     22.01   recovery            13.0              0             0
+     23.01   recovery            12.0              0             0
+  [ 23.81s] finished: {"validation_status": "passed", "checks": {"complete_client_csv": true, "protected_client_all_replied": true, "two_source_alert": true, "expected_filtering": true, "protected_client_never_dropped": true, "rules_expired": true, "source_recovery": true, "no_gateway_errors": true, "every_forward_received_echo": true}}
+
+  PASSED: client 230/230; observed gateway drops 0; evidence: /Users/nambi/Documents/CN Project/artifacts/terminal-runs/20261020-214223-268960/off
+
+=== MITIGATION ON ===
+       time   phase         forwarded/s  dropped total  active rules
+  [  0.00s] phase: {"name": "baseline"}
+      1.00   baseline            14.0              0             0
+  [  2.00s] phase: {"name": "attack"}
+      2.00   attack              16.0              0             0
+      3.00   attack            1207.7              0             0
+  [  4.00s] alert: {"sources": {"10.0.0.21": 599.5663881924047, "10.0.0.22": 599.5663881924047}, "victim_pps": 1209.1255495213495}
+  [  4.00s] gateway_drop_installed: {"source": "10.0.0.21", "timeout_s": 10, "enforcement": "Python userspace UDP gateway"}
+  [  4.00s] gateway_drop_installed: {"source": "10.0.0.22", "timeout_s": 10, "enforcement": "Python userspace UDP gateway"}
+      4.00   attack            1209.1              0             2
+      5.00   attack              10.0           1202             2
+      6.00   attack              10.0           2402             2
+      7.00   attack               9.0           3604             2
+      8.00   attack              10.0           4802             2
+      9.01   attack              10.0           6004             2
+  [ 10.00s] phase: {"name": "expiry-wait"}
+     10.01   expiry-wait          9.0           7198             2
+     11.01   expiry-wait         10.0           7198             2
+     12.01   expiry-wait         10.0           7198             2
+     13.01   expiry-wait          9.0           7198             2
+  [ 14.00s] rule_expired: {"source": "10.0.0.21"}
+  [ 14.00s] rule_expired: {"source": "10.0.0.22"}
+     14.01   expiry-wait         10.0           7198             0
+     15.01   expiry-wait         10.0           7198             0
+     16.01   expiry-wait          9.0           7198             0
+     17.01   expiry-wait         10.0           7198             0
+     18.01   expiry-wait         10.0           7198             0
+     19.01   expiry-wait          9.0           7198             0
+     20.01   expiry-wait         10.0           7198             0
+  [ 21.00s] phase: {"name": "recovery"}
+     21.01   recovery            12.0           7198             0
+     22.01   recovery            13.0           7198             0
+     23.01   recovery            12.0           7198             0
+  [ 23.80s] finished: {"validation_status": "passed", "checks": {"complete_client_csv": true, "protected_client_all_replied": true, "two_source_alert": true, "expected_filtering": true, "protected_client_never_dropped": true, "rules_expired": true, "source_recovery": true, "no_gateway_errors": true, "every_forward_received_echo": true}}
+
+  PASSED: client 230/230; observed gateway drops 7,198; evidence: /Users/nambi/Documents/CN Project/artifacts/terminal-runs/20261020-214223-268960/on
+
+COMPARISON | real received datagrams, entire trial
+  OFF | attacker ingress  9,616 | victim echoes  9,616 | gateway drops      0 | client 230/230
+  ON  | attacker ingress  9,616 | victim echoes  2,418 | gateway drops  7,198 | client 230/230
+Rates are configured equally; actual counts vary with OS scheduling.
+Both clients may have zero loss. This shows filtering, not proven saturation protection.
+
+Explain: ingress continued, the gateway discarded offender datagrams,
+the echo service replied to the protected client, then expired rules allowed recovery.
+Open events.jsonl, packets.csv and summary.json in the printed evidence folder.
+For full OpenFlow execution, follow WINDOWS_DEMO.md using an existing Linux lab.

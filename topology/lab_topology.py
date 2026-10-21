@@ -11,6 +11,10 @@ HOSTS = {
     "a3": ("10.0.0.23/24", "02:00:00:00:00:23"),
 }
 
+# Mininet assigns switch ports in host insertion order. Keep this mapping
+# explicit so the controller can bind each permitted identity to its link.
+HOST_PORTS = {name: port for port, name in enumerate(HOSTS, start=1)}
+
 
 class DDoSTopo(Topo):
     """Single OVS switch and lab hosts; no NAT or external links."""
@@ -19,7 +23,7 @@ class DDoSTopo(Topo):
         switch = self.addSwitch("s1", protocols="OpenFlow13")
         for name, (address, mac) in HOSTS.items():
             host = self.addHost(name, ip=address, mac=mac)
-            self.addLink(host, switch)
+            self.addLink(host, switch, port2=HOST_PORTS[name])
 
 
 # Allows `mn --custom topology/lab_topology.py --topo ddos`.
