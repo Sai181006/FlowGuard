@@ -92,6 +92,8 @@ def main():
                         help="new output folder inside this repository")
     parser.add_argument("--pps", type=int, default=600)
     parser.add_argument("--duration-s", type=int, default=8)
+    parser.add_argument("--pcap", action="store_true",
+                        help="capture four switch ports into a Wireshark pcapng file")
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error("run as root in Ubuntu; Mininet needs network namespaces")
@@ -117,6 +119,8 @@ def main():
     command = [sys.executable, "-u", str(ROOT / "experiments" / "run_trial.py"),
                "--mode", "attack-on", "--output", str(output),
                "--pps", str(args.pps), "--duration-s", str(args.duration_s)]
+    if args.pcap:
+        command.append("--pcap")
     with (output / "demo-runner.log").open("w", encoding="utf-8") as log:
         runner = subprocess.Popen(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
         offset = 0
@@ -172,6 +176,13 @@ def main():
     print("  Interpretation: selective filtering is shown; improved availability "
           "needs the separate OFF/ON comparison.")
     print(f"  Evidence: {output.relative_to(ROOT)} (inside this project)")
+    if args.pcap:
+        capture = json.loads((output / "capture-summary.json").read_text(encoding="utf-8"))
+        print(f"  Wireshark file: {output.relative_to(ROOT) / capture['file']}")
+        print("  Captured requests by observation point: " + ", ".join(
+            f"{name}={count}" for name, count in capture["requests_seen"].items()))
+        if capture["truncated"]:
+            print("  Capture reached its 64 MiB limit; repeat at a lower rate for a full graph.")
     return 0
 
 

@@ -28,7 +28,7 @@ sudo python3 topology/controller_smoke.py
 
 The controller smoke test checks the OpenFlow connection, all host pings, UDP probes, attributable flow counters, and reconnection. Its final line should be `M3 controller smoke test: PASS`. If Mininet reports stale interfaces after an interrupted run, use `sudo mn -c` before retrying. Do not run two trials at once; they use the same switch and controller port.
 
-For the existing Windows workspace, the project path inside Ubuntu is `/mnt/c/Users/Sai/Documents/ChatGPT/cn project/ddos_publish`. From PowerShell, start Ubuntu with `wsl -d Ubuntu`, then `cd` to that path before running the commands below.
+For the existing Windows workspace, use the `cn_project` junction to avoid a path with spaces. From PowerShell, the complete command is `wsl -d Ubuntu -u root --cd 'C:\Users\Sai\Documents\ChatGPT\cn_project\m7_publish' --exec python3 experiments/demo.py`.
 
 ## Live review: about 45 seconds
 
@@ -73,6 +73,8 @@ python3 experiments/analyze.py results/review-off results/review-on
 Use fresh output folder names when repeating these commands. The [saved chart](../results/m6-rate-comparison.png) and [measured results](RESULTS.md) are ready for a review where time permits only one live trial. A five-minute benign baseline can be reproduced with `sudo python3 experiments/run_trial.py --mode baseline --output results/review-baseline`.
 
 The [course PDF report](../reports/FlowGuard_BCSE308P_Project_Report.pdf) and [editable Word report](../reports/FlowGuard_BCSE308P_Project_Report.docx) contain the measured results and limitations. Team names and registration details remain blank for the owner to fill before submission.
+
+For packet-level evidence, run `experiments/demo.py --pcap` and follow the [Wireshark walkthrough](WIRESHARK_DEMO.md). A real, ready-to-open capture is included in `evidence/m7/flowguard-wireshark-sample.pcapng`.
 
 The clean committed-source rehearsal and its observed output are recorded in [M7 evidence](../evidence/m7/RESULTS.md).
 

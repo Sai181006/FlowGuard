@@ -12,6 +12,8 @@ from pathlib import Path
 from mininet.net import Mininet
 from mininet.node import OVSSwitch, RemoteController
 
+from packet_capture import PacketCapture, save_summary, switch_ports
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "topology"))
 from lab_topology import DDoSTopo  # noqa: E402
 
@@ -57,6 +59,8 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--pps", type=int, default=600)
     parser.add_argument("--duration-s", type=int, default=8)
+    parser.add_argument("--pcap", action="store_true",
+                        help="save a four-interface Wireshark pcapng during this trial")
     args = parser.parse_args()
     if not 1 <= args.pps <= 2000 or not 2 <= args.duration_s <= 30:
         parser.error("pps must be 1..2000 and duration-s must be 2..30")
@@ -77,6 +81,7 @@ def main():
     )
     net = Mininet(topo=DDoSTopo(), controller=None, switch=OVSSwitch)
     server = None
+    capture = None
     children = []
     streams = []
     metadata = {"mode": args.mode, "started_utc": utc_now(), "pps_per_attacker": args.pps,
@@ -109,6 +114,8 @@ def main():
                 raise RuntimeError(f"prime probe failed from {host_name}")
         time.sleep(2.2)
         dump_flows(output / "flows-before.txt")
+        if args.pcap:
+            capture = PacketCapture(output / "flowguard.pcapng", switch_ports(net)).start()
         metadata["phase_start_monotonic_s"] = time.monotonic()
         metadata["phase_start_utc"] = utc_now()
         if args.mode == "baseline":
@@ -195,6 +202,9 @@ def main():
             process.wait(timeout=10)
             stream.close()
             metadata["recovery_probe_exit"] = process.returncode
+        if capture is not None:
+            metadata["packet_capture"] = capture.stop()
+            save_summary(output / "capture-summary.json", metadata["packet_capture"])
         metadata["finished_utc"] = utc_now()
         metadata["finished_monotonic_s"] = time.monotonic()
         metadata["status"] = "completed"
@@ -204,16 +214,21 @@ def main():
         metadata["error"] = str(exc)
         raise
     finally:
-        for _, process in children:
-            stop(process)
-        stop(server)
-        net.stop()
-        stop(controller)
-        for stream in streams:
-            stream.close()
-        controller_log.close()
-        server_log.close()
-        (output / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+        try:
+            for _, process in children:
+                stop(process)
+            if capture is not None and capture.active:
+                metadata["packet_capture"] = capture.stop()
+                save_summary(output / "capture-summary.json", metadata["packet_capture"])
+        finally:
+            stop(server)
+            net.stop()
+            stop(controller)
+            for stream in streams:
+                stream.close()
+            controller_log.close()
+            server_log.close()
+            (output / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

@@ -14,6 +14,8 @@ sudo python3 experiments/demo.py
 
 The command starts the controller, five-host topology, legitimate probe, bounded two-source traffic, and recovery check. It prints the alert, rule confirmation, rule expiry, and probe results as a review timeline. Each run saves its evidence in a new `results/demo-*` folder and tears down Mininet automatically.
 
+For a packet-level review, use `sudo python3 experiments/demo.py --pcap`, then follow the [Wireshark walkthrough](docs/WIRESHARK_DEMO.md). A [ready capture](evidence/m7/flowguard-wireshark-sample.pcapng) is included for an offline rehearsal.
+
 ## What the measured results show
 
 In the matched 600-packets/s-per-source trials, the switch confirmed mitigation in 1.634 seconds and victim-received attacker traffic fell to zero in complete post-confirmation windows. The legitimate client received 80/80 replies with mitigation. It also received 80/80 without mitigation, so **improved service availability was not demonstrated**. See [results and limitations](docs/RESULTS.md) and the [saved comparison chart](results/m6-rate-comparison.png).
