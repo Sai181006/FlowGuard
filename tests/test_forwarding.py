@@ -12,10 +12,11 @@ from os_ken.ofproto import ofproto_v1_3 as ofp
 from os_ken.ofproto import ofproto_v1_3_parser as parser
 
 from controller.detection import CounterTracker, TwoWindowDetector
+from controller.mitigation import OffenderHistory
 from controller.forwarding import (
-    CLIENT_IP, COOKIE_CONTROL, COOKIE_DROP, COOKIE_PUNT, COOKIE_UDP,
+    CLIENT_IP, COOKIE_CONTROL, COOKIE_DROP, COOKIE_PUNT, COOKIE_RATELIMIT, COOKIE_UDP,
     DEFAULT_CONFIG, LAB_MAC_TO_IP, LAB_MAC_TO_PORT, LAB_IP_TO_MAC,
-    PRIORITY_CONTROL, PRIORITY_UDP,
+    PRIORITY_CONTROL, PRIORITY_DROP, PRIORITY_MITIGATION, PRIORITY_UDP,
     ForwardingController, drop_match_fields, forwarding_match_fields,
     load_config, validate_config,
 )
@@ -44,6 +45,12 @@ def make_app():
     app.pending_replies = {}
     app.pending_barriers = {}
     app.config = load_config(DEFAULT_CONFIG)
+    app.offenders = {1: OffenderHistory.from_config(app.config)}
+    app.meter_support = {1: "unknown"}
+    app.installed_meters = {1: set()}
+    app.pending_ratelimit_xids = {1: {}}
+    app.ratelimit_counters = {1: {}}
+    app.meter_counters = {1: {}}
     app.mitigation_enabled = True
     app.logger = logging.getLogger("test-forwarding")
     app.events = []
@@ -59,6 +66,84 @@ def deliver(app, frame_data, in_port):
         datapath=app.datapath, match={"in_port": in_port}, data=frame_data,
         buffer_id=ofp.OFP_NO_BUFFER,
     )))
+
+
+class SerializingDatapath:
+    """Like OS-Ken's Datapath.send_msg: assign an xid, then encode the message."""
+
+    def __init__(self, messages, dpid=1):
+        self.id = dpid
+        self.ofproto = ofp
+        self.ofproto_parser = parser
+        self.messages = messages
+        self.xid = 0
+
+    def send_msg(self, msg):
+        assert isinstance(msg, parser.MsgBase)
+        if msg.xid is None:
+            self.xid += 1
+            msg.set_xid(self.xid)
+        msg.serialize()
+        self.messages.append(msg)
+
+
+def make_serializing_app(action="drop", backoff=False, **mitigation):
+    app = make_app()
+    app.config["mitigation"].update(mitigation, action=action)
+    app.config["mitigation"]["backoff"]["enabled"] = backoff
+    app.offenders = {1: OffenderHistory.from_config(app.config)}
+    app.datapath = SerializingDatapath(app._messages)
+    return app
+
+
+def flow_stat(source, port, packets, udp_port=9000, cookie=COOKIE_UDP):
+    return SimpleNamespace(
+        match=parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP, ip_proto=17,
+                              ipv4_src=source, ipv4_dst="10.0.0.10",
+                              udp_dst=udp_port, in_port=port,
+                              eth_src=LAB_IP_TO_MAC[source],
+                              eth_dst=LAB_IP_TO_MAC["10.0.0.10"]),
+        cookie=cookie, packet_count=packets, byte_count=packets * 128,
+    )
+
+
+def poll(app, now, stats):
+    with mock.patch("controller.forwarding.time.monotonic", return_value=now):
+        app.flow_stats_handler(SimpleNamespace(msg=SimpleNamespace(
+            datapath=app.datapath, xid=int(now * 100), flags=0, body=stats,
+        )))
+
+
+ATTACKERS = (("10.0.0.21", 3), ("10.0.0.22", 4))
+
+
+def flood(app, times=(1, 2, 3), start=0):
+    """200 pps from both attackers; the third poll raises the alert."""
+    for index, now in enumerate(times):
+        poll(app, now, [flow_stat(source, port, start + 200 * index) for source, port in ATTACKERS])
+
+
+def flow_mods(app, cookie):
+    return [msg for msg in app._messages if isinstance(msg, parser.OFPFlowMod) and msg.cookie == cookie]
+
+
+def meter_mods(app):
+    return [msg for msg in app._messages if isinstance(msg, parser.OFPMeterMod)]
+
+
+def events(app, kind):
+    return [event for event in app.events if event["type"] == kind]
+
+
+def reply_to_barrier(app, barrier=None):
+    if barrier is None:
+        barrier = [msg for msg in app._messages if isinstance(msg, parser.OFPBarrierRequest)][-1]
+    app.barrier_handler(SimpleNamespace(msg=SimpleNamespace(datapath=app.datapath, xid=barrier.xid)))
+
+
+def switch_error(app, error_type, code, xid):
+    app.error_handler(SimpleNamespace(msg=SimpleNamespace(
+        datapath=app.datapath, type=error_type, code=code, xid=xid)))
 
 
 class ForwardingMatchTests(unittest.TestCase):
@@ -340,6 +425,381 @@ class FlowStatsScopeTests(unittest.TestCase):
         app.switch_disconnected_handler(SimpleNamespace(datapath=app.datapath))
         self.assertEqual(app.pending_replies, {(2, 12): []})
         self.assertEqual(app.pending_barriers, {(2, 22): ["10.0.0.22"]})
+
+    def test_disconnect_clears_meter_and_offender_state(self):
+        app = make_serializing_app(action="rate_limit")
+        flood(app)
+        self.assertEqual(app.installed_meters[1], {1021, 1022})
+        self.assertTrue(app.pending_ratelimit_xids[1])
+        app.pending_ratelimit_xids[2] = {99: "10.0.0.23"}
+        app.switch_disconnected_handler(SimpleNamespace(datapath=app.datapath))
+        for state in (app.offenders, app.meter_support, app.installed_meters,
+                      app.pending_ratelimit_xids, app.ratelimit_counters, app.meter_counters):
+            self.assertNotIn(1, state)
+        self.assertEqual(app.pending_ratelimit_xids, {2: {99: "10.0.0.23"}})
+        self.assertFalse([key for key in app.pending_barriers if key[0] == 1])
+
+
+class ShippedDropBehaviourTests(unittest.TestCase):
+    def test_shipped_config_drops_with_fixed_ten_second_rules(self):
+        app = make_serializing_app()
+        self.assertEqual(app.config["mitigation"]["action"], "drop")
+        for now in (100, 111, 122):
+            app._mitigate(app.datapath, {"10.0.0.21": 200.0}, now)
+        drops = flow_mods(app, COOKIE_DROP)
+        self.assertEqual([msg.hard_timeout for msg in drops], [10, 10, 10])
+        self.assertEqual({msg.priority for msg in drops}, {PRIORITY_DROP})
+        self.assertEqual(PRIORITY_DROP, PRIORITY_MITIGATION)
+        self.assertFalse(meter_mods(app))
+        self.assertEqual([event["offense_count"] for event in events(app, "drop_requested")], [1, 2, 3])
+        self.assertEqual({event["action"] for event in events(app, "drop_requested")}, {"drop"})
+
+    def test_barrier_still_accepts_the_list_form(self):
+        app = make_app()
+        app.pending_barriers[(1, 7)] = ["10.0.0.21"]
+        app.barrier_handler(SimpleNamespace(msg=SimpleNamespace(datapath=app.datapath, xid=7)))
+        self.assertEqual(events(app, "drop_confirmed")[0]["sources"], ["10.0.0.21"])
+
+    def test_legacy_seven_key_config_still_works(self):
+        app = make_app()
+        legacy = json.loads(Path(DEFAULT_CONFIG).read_text(encoding="utf-8"))
+        for key in ("detector", "detectors", "mitigation"):
+            legacy.pop(key, None)
+        app.config = legacy
+        app.offenders = {}
+        self.assertEqual(app._new_detector().name, "threshold")
+        app.datapath = SerializingDatapath(app._messages)
+        app._mitigate(app.datapath, {"10.0.0.21": 200.0}, 5)
+        self.assertEqual([msg.hard_timeout for msg in flow_mods(app, COOKIE_DROP)], [10])
+
+
+class RateLimitMitigationTests(unittest.TestCase):
+    def test_rate_limit_installs_pps_meter_then_identity_bound_metered_flow(self):
+        app = make_serializing_app(action="rate_limit")
+        flood(app)
+        meters = meter_mods(app)
+        self.assertEqual([msg.meter_id for msg in meters], [1021, 1022])
+        for meter in meters:
+            self.assertEqual(meter.command, ofp.OFPMC_ADD)
+            self.assertEqual(meter.flags, ofp.OFPMF_PKTPS | ofp.OFPMF_STATS | ofp.OFPMF_BURST)
+            self.assertEqual(len(meter.bands), 1)
+            self.assertIsInstance(meter.bands[0], parser.OFPMeterBandDrop)
+            self.assertEqual((meter.bands[0].rate, meter.bands[0].burst_size), (20, 20))
+        limits = flow_mods(app, COOKIE_RATELIMIT)
+        self.assertEqual(COOKIE_RATELIMIT & 0xFF, 0x06)
+        self.assertEqual(len(limits), 2)
+        self.assertFalse(flow_mods(app, COOKIE_DROP))
+        for flow, (source, port), meter in zip(limits, ATTACKERS, meters):
+            self.assertLess(app._messages.index(meter), app._messages.index(flow))
+            self.assertEqual(flow.priority, 200)
+            self.assertEqual(flow.hard_timeout, 10)
+            self.assertEqual(flow.flags, ofp.OFPFF_SEND_FLOW_REM)
+            self.assertEqual(dict(flow.match.items()), {
+                **drop_match_fields(source), "in_port": port, "eth_src": LAB_IP_TO_MAC[source],
+                "eth_dst": LAB_IP_TO_MAC["10.0.0.10"]})
+            meter_instruction, apply_instruction = flow.instructions
+            self.assertIsInstance(meter_instruction, parser.OFPInstructionMeter)
+            self.assertEqual(meter_instruction.meter_id, meter.meter_id)
+            self.assertEqual(apply_instruction.type, ofp.OFPIT_APPLY_ACTIONS)
+            self.assertEqual([action.port for action in apply_instruction.actions], [1])
+            decoded = parser.OFPFlowMod.parser(app.datapath, flow.version, flow.msg_type, flow.msg_len,
+                                               flow.xid, bytes(flow.buf))
+            self.assertEqual([type(inst) for inst in decoded.instructions],
+                             [parser.OFPInstructionMeter, parser.OFPInstructionActions])
+            self.assertEqual((decoded.priority, decoded.hard_timeout, decoded.cookie),
+                             (200, 10, COOKIE_RATELIMIT))
+        requested = events(app, "ratelimit_requested")
+        self.assertEqual([(e["source"], e["meter_id"], e["rate_pps"], e["burst_packets"],
+                           e["hard_timeout_s"], e["offense_count"]) for e in requested],
+                         [("10.0.0.21", 1021, 20, 20, 10, 1), ("10.0.0.22", 1022, 20, 20, 10, 1)])
+        self.assertEqual(len(app.pending_ratelimit_xids[1]), 4)
+        reply_to_barrier(app)
+        self.assertEqual(events(app, "ratelimit_confirmed")[0]["sources"], ["10.0.0.21", "10.0.0.22"])
+        self.assertFalse(events(app, "drop_confirmed"))
+        self.assertEqual(app.pending_ratelimit_xids[1], {})
+
+    def test_installed_meter_is_modified_with_the_current_rate(self):
+        app = make_serializing_app(action="rate_limit")
+        app._mitigate(app.datapath, {"10.0.0.21": 200.0}, 100)
+        app.config["mitigation"]["rate_limit_pps"] = 50
+        app.config["mitigation"]["rate_limit_burst_packets"] = 0
+        app._mitigate(app.datapath, {"10.0.0.21": 200.0}, 111)
+        first, second = meter_mods(app)
+        self.assertEqual((first.command, second.command), (ofp.OFPMC_ADD, ofp.OFPMC_MODIFY))
+        self.assertEqual((second.bands[0].rate, second.bands[0].burst_size), (50, 0))
+        self.assertEqual(second.flags, ofp.OFPMF_PKTPS | ofp.OFPMF_STATS)
+
+    def test_meter_mod_failure_falls_back_to_drop_with_the_same_timeout(self):
+        app = make_serializing_app(action="rate_limit", backoff=True)
+        app.offenders[1].next_offense("10.0.0.21", 0)  # earlier offense: back-off gives 20 s
+        flood(app)
+        meter = meter_mods(app)[0]
+        switch_error(app, ofp.OFPET_METER_MOD_FAILED, ofp.OFPMMFC_OUT_OF_METERS, meter.xid)
+        self.assertEqual(app.meter_support[1], "unsupported")
+        self.assertEqual(events(app, "openflow_error")[0]["error_type"], ofp.OFPET_METER_MOD_FAILED)
+        self.assertFalse(flow_mods(app, COOKIE_DROP))  # nothing happens before the barrier
+        reply_to_barrier(app)
+        failed = events(app, "ratelimit_failed")
+        self.assertEqual(len(failed), 1)
+        self.assertEqual((failed[0]["sources"], failed[0]["error_type"], failed[0]["error_code"],
+                          failed[0]["fallback"]),
+                         (["10.0.0.21"], ofp.OFPET_METER_MOD_FAILED, ofp.OFPMMFC_OUT_OF_METERS, "drop"))
+        self.assertEqual(events(app, "ratelimit_confirmed")[0]["sources"], ["10.0.0.22"])
+        drops = flow_mods(app, COOKIE_DROP)
+        self.assertEqual([(msg.match["ipv4_src"], msg.hard_timeout) for msg in drops], [("10.0.0.21", 20)])
+        self.assertNotIn(1021, app.installed_meters[1])
+        self.assertIn(1022, app.installed_meters[1])
+        self.assertFalse(events(app, "drop_confirmed"))
+        reply_to_barrier(app)  # the fallback has its own barrier
+        self.assertEqual(events(app, "drop_confirmed")[0]["sources"], ["10.0.0.21"])
+        # The switch is now known to lack meters: the next offender is dropped directly.
+        app._mitigate(app.datapath, {"10.0.0.23": 200.0}, 4)
+        self.assertEqual(flow_mods(app, COOKIE_DROP)[-1].match["ipv4_src"], "10.0.0.23")
+        self.assertEqual(events(app, "ratelimit_failed")[-1]["reason"], "meter_unsupported")
+
+    def test_rejected_metered_flow_falls_back_for_that_source_only(self):
+        app = make_serializing_app(action="rate_limit")
+        flood(app)
+        flow = flow_mods(app, COOKIE_RATELIMIT)[1]
+        switch_error(app, ofp.OFPET_BAD_INSTRUCTION, ofp.OFPBIC_UNSUP_INST, flow.xid)
+        reply_to_barrier(app)
+        self.assertEqual(events(app, "ratelimit_failed")[0]["sources"], ["10.0.0.22"])
+        self.assertEqual(events(app, "ratelimit_confirmed")[0]["sources"], ["10.0.0.21"])
+        self.assertEqual([msg.match["ipv4_src"] for msg in flow_mods(app, COOKIE_DROP)], ["10.0.0.22"])
+
+    def test_unattributed_meter_error_fails_every_pending_rate_limit(self):
+        app = make_serializing_app(action="rate_limit")
+        flood(app)
+        switch_error(app, ofp.OFPET_METER_MOD_FAILED, ofp.OFPMMFC_UNKNOWN, 0xFFFF)
+        reply_to_barrier(app)
+        self.assertFalse(events(app, "ratelimit_confirmed"))
+        self.assertEqual({msg.match["ipv4_src"] for msg in flow_mods(app, COOKIE_DROP)},
+                         {"10.0.0.21", "10.0.0.22"})
+
+    def test_unrelated_switch_error_is_logged_without_fallback(self):
+        app = make_serializing_app(action="rate_limit")
+        flood(app)
+        switch_error(app, ofp.OFPET_BAD_REQUEST, ofp.OFPBRC_BAD_TYPE, 0xFFFF)
+        reply_to_barrier(app)
+        self.assertEqual(len(events(app, "openflow_error")), 1)
+        self.assertEqual(app.meter_support[1], "unknown")
+        self.assertEqual(len(events(app, "ratelimit_confirmed")[0]["sources"]), 2)
+
+    def test_switch_without_meters_gets_drop_rules_directly(self):
+        app = make_serializing_app(action="rate_limit")
+        app.meter_features_handler(SimpleNamespace(msg=SimpleNamespace(
+            datapath=app.datapath,
+            body=[parser.OFPMeterFeaturesStats(max_meter=0, band_types=1 << ofp.OFPMBT_DROP,
+                                               capabilities=ofp.OFPMF_PKTPS, max_bands=1, max_color=0)])))
+        self.assertEqual(app.meter_support[1], "unsupported")
+        self.assertEqual(events(app, "meter_features")[0]["supported"], False)
+        flood(app)
+        self.assertFalse(meter_mods(app))
+        self.assertFalse(flow_mods(app, COOKIE_RATELIMIT))
+        self.assertEqual({msg.match["ipv4_src"] for msg in flow_mods(app, COOKIE_DROP)},
+                         {"10.0.0.21", "10.0.0.22"})
+        failed = events(app, "ratelimit_failed")
+        self.assertEqual((failed[0]["sources"], failed[0]["error_type"], failed[0]["reason"]),
+                         (["10.0.0.21", "10.0.0.22"], None, "meter_unsupported"))
+        reply_to_barrier(app)
+        self.assertEqual(events(app, "drop_confirmed")[0]["sources"], ["10.0.0.21", "10.0.0.22"])
+
+    def test_meter_features_with_pps_drop_band_mark_switch_supported(self):
+        app = make_app()
+        app.meter_features_handler(SimpleNamespace(msg=SimpleNamespace(
+            datapath=app.datapath,
+            body=[parser.OFPMeterFeaturesStats(max_meter=200000, band_types=1 << ofp.OFPMBT_DROP,
+                                               capabilities=0xF, max_bands=1, max_color=0)])))
+        self.assertEqual(app.meter_support[1], "supported")
+        app.meter_support[1] = "unsupported"  # an earlier meter error is never overridden
+        app.meter_features_handler(SimpleNamespace(msg=SimpleNamespace(
+            datapath=app.datapath,
+            body=[parser.OFPMeterFeaturesStats(200000, 2, 0xF, 1, 0)])))
+        self.assertEqual(app.meter_support[1], "unsupported")
+
+    def test_graduated_policy_rate_limits_first_and_drops_repeat_offender(self):
+        app = make_serializing_app(action="graduated")
+        flood(app)
+        self.assertEqual(len(flow_mods(app, COOKIE_RATELIMIT)), 2)
+        self.assertFalse(flow_mods(app, COOKIE_DROP))
+        reply_to_barrier(app)
+        # The 10.0.0.21 rule expires while the episode is still active.
+        app.flow_removed_handler(SimpleNamespace(msg=SimpleNamespace(
+            datapath=app.datapath, cookie=COOKIE_RATELIMIT, match=flow_mods(app, COOKIE_RATELIMIT)[0].match,
+            packet_count=180, reason=ofp.OFPRR_HARD_TIMEOUT)))
+        removed = events(app, "ratelimit_removed")[0]
+        self.assertEqual((removed["source"], removed["packets"]), ("10.0.0.21", 180))
+        self.assertNotIn("10.0.0.21", app.active_blocks[1])
+        flood(app, times=(4, 5), start=600)
+        drops = flow_mods(app, COOKIE_DROP)
+        self.assertEqual([msg.match["ipv4_src"] for msg in drops], ["10.0.0.21"])
+        request = events(app, "drop_requested")[0]
+        self.assertEqual((request["offense_count"], request["action"]), (2, "drop"))
+        self.assertEqual(len(flow_mods(app, COOKIE_RATELIMIT)), 2)  # 10.0.0.22 still limited
+
+    def test_backoff_doubles_timeout_for_repeat_offense_within_memory(self):
+        app = make_serializing_app(action="drop", backoff=True)
+        app._mitigate(app.datapath, {"10.0.0.21": 200.0}, 100)
+        app._mitigate(app.datapath, {"10.0.0.21": 200.0}, 111)
+        app._mitigate(app.datapath, {"10.0.0.21": 200.0}, 131.5)
+        app._mitigate(app.datapath, {"10.0.0.21": 200.0}, 500)  # memory (120 s) has passed
+        self.assertEqual([msg.hard_timeout for msg in flow_mods(app, COOKIE_DROP)], [10, 20, 40, 10])
+
+    def test_active_block_suppresses_rate_limited_source_until_rule_ends(self):
+        app = make_serializing_app(action="rate_limit")
+        app._mitigate(app.datapath, {"10.0.0.21": 200.0}, 100)
+        app._mitigate(app.datapath, {"10.0.0.21": 200.0}, 105)
+        self.assertEqual(len(flow_mods(app, COOKIE_RATELIMIT)), 1)
+        self.assertEqual(app.offenders[1].offense_count("10.0.0.21"), 1)
+
+
+class DetectorSelectionTests(unittest.TestCase):
+    class StubDetector:
+        name = "stub"
+
+        def __init__(self, protected_sources):
+            self.protected_sources = frozenset(protected_sources)
+            self.alert_active = False
+            self.high_windows = 0
+
+        def observe(self, rates):
+            if self.alert_active or not rates["source_pps"]:
+                return None
+            self.alert_active = True
+            return {"victim_pps": rates["victim_pps"], "sources": dict(rates["source_pps"]),
+                    "detector": self.name, "scores": {"10.0.0.21": 9.5}}
+
+        def qualifying_sources(self, rates):
+            return {}
+
+        def reset(self):
+            self.alert_active = False
+
+        def state(self):
+            return {"detector": self.name, "alert_active": self.alert_active}
+
+    def test_configured_detector_is_built_with_victim_and_client_protected(self):
+        app = make_app()
+        app.config["detector"] = "ewma"
+        calls = []
+
+        def fake_build(config, protected_sources=None):
+            calls.append((config["detector"], set(protected_sources)))
+            return self.StubDetector(protected_sources)
+
+        with mock.patch("controller.forwarding.build_detector", side_effect=fake_build):
+            detector = app._new_detector()
+        self.assertEqual(detector.name, "stub")
+        self.assertEqual(calls, [("ewma", {"10.0.0.10", CLIENT_IP})])
+
+    def test_threshold_detector_comes_from_the_registry(self):
+        app = make_app()
+        detector = app._new_detector()
+        self.assertIsInstance(detector, TwoWindowDetector)
+        self.assertEqual((detector.victim_pps, detector.source_pps, detector.consecutive_windows),
+                         (100.0, 30.0, 2))
+
+    def test_ewma_detector_when_available(self):
+        app = make_app()
+        app.config["detector"] = "ewma"
+        try:
+            detector = app._new_detector()
+        except ValueError:
+            self.skipTest("ewma detector not available in controller.detectors yet")
+        self.assertEqual(detector.name, "ewma")
+        self.assertIn(CLIENT_IP, detector.protected_sources)
+
+    def test_alert_event_carries_detector_name_scores_and_state(self):
+        app = make_serializing_app()
+        app.detectors[1] = self.StubDetector({"10.0.0.10", CLIENT_IP})
+        flood(app, times=(1, 2))
+        alert = events(app, "alert")[0]
+        self.assertEqual((alert["detector"], alert["scores"]), ("stub", {"10.0.0.21": 9.5}))
+        self.assertEqual(events(app, "sample")[-1]["detector_state"]["detector"], "stub")
+        self.assertEqual(len(flow_mods(app, COOKIE_DROP)), 2)
+
+    def test_threshold_alert_event_names_threshold_with_empty_scores(self):
+        app = make_app()
+        flood(app)
+        alert = events(app, "alert")[0]
+        self.assertEqual((alert["detector"], alert["scores"]), ("threshold", {}))
+        self.assertEqual(alert["sources"], {"10.0.0.21": 200.0, "10.0.0.22": 200.0})
+        self.assertEqual(events(app, "sample")[-1]["detector_state"],
+                         {"detector": "threshold", "high_windows": 2, "alert_active": True})
+
+
+class MeterTelemetryTests(unittest.TestCase):
+    def _meter_reply(self, app, *stats):
+        app.meter_stats_handler(SimpleNamespace(msg=SimpleNamespace(datapath=app.datapath, body=list(stats))))
+
+    @staticmethod
+    def _stat(meter_id, packets_in, band_packets, flow_count=1):
+        return parser.OFPMeterStats(meter_id=meter_id, flow_count=flow_count, packet_in_count=packets_in,
+                                    byte_in_count=packets_in * 128, duration_sec=1, duration_nsec=0,
+                                    band_stats=[parser.OFPMeterBandStats(band_packets, band_packets * 128)])
+
+    def test_meter_sample_reports_band_drop_deltas(self):
+        app = make_app()
+        self._meter_reply(app, self._stat(1021, 100, 60), self._stat(7, 5, 5))
+        self._meter_reply(app, self._stat(1021, 250, 150))
+        self._meter_reply(app, self._stat(1021, 10, 5))  # meter re-created
+        self._meter_reply(app, self._stat(1021, 10, 5, flow_count=0))  # idle meter
+        samples = events(app, "meter_sample")
+        self.assertEqual([(s["meter_id"], s["source"], s["packet_in_delta"], s["band_drop_delta"],
+                           s["band_drop_total"]) for s in samples],
+                         [(1021, "10.0.0.21", 100, 60, 60), (1021, "10.0.0.21", 150, 90, 150),
+                          (1021, "10.0.0.21", 10, 5, 5)])
+
+    def test_rate_limited_counters_are_reported_but_not_fed_to_the_detector(self):
+        app = make_app()
+        for now, packets in ((1, 0), (2, 500), (3, 1000)):
+            poll(app, now, [flow_stat("10.0.0.21", 3, packets, cookie=COOKIE_RATELIMIT),
+                            flow_stat("10.0.0.22", 4, packets // 10)])
+        sample = events(app, "sample")[-1]
+        self.assertEqual(sample["ratelimit_packet_delta"], {"10.0.0.21": 500})
+        self.assertEqual(sample["ratelimit_packet_total"], {"10.0.0.21": 1000})
+        self.assertEqual(sample["source_pps"], {"10.0.0.22": 50.0})
+        self.assertEqual(sample["drop_packet_delta"], {})
+
+    def test_monitor_requests_meter_stats_only_while_meters_exist(self):
+        app = make_app()
+        app.datapaths = {1: app.datapath}
+        for meters, expected in ((set(), 0), ({1021}, 1)):
+            app._messages.clear()
+            app.installed_meters[1] = meters
+            with mock.patch("controller.forwarding.hub.sleep", side_effect=StopIteration):
+                with self.assertRaises(StopIteration):
+                    app._monitor()
+            requests = [msg for msg in app._messages if isinstance(msg, parser.OFPMeterStatsRequest)]
+            self.assertEqual(len(requests), expected)
+            self.assertTrue(all(msg.meter_id == ofp.OFPM_ALL for msg in requests))
+
+    def test_drop_rule_removal_is_unchanged(self):
+        app = make_app()
+        app.active_blocks[1]["10.0.0.21"] = 50
+        app.flow_removed_handler(SimpleNamespace(msg=SimpleNamespace(
+            datapath=app.datapath, cookie=COOKIE_DROP,
+            match=parser.OFPMatch(**drop_match_fields("10.0.0.21")), packet_count=7, reason=0)))
+        self.assertEqual(events(app, "drop_removed")[0]["packets"], 7)
+        self.assertFalse(events(app, "ratelimit_removed"))
+        self.assertNotIn("10.0.0.21", app.active_blocks[1])
+
+
+class SwitchConnectMeterTests(unittest.TestCase):
+    def test_connect_deletes_stale_meters_queries_features_and_resets_state(self):
+        app = make_serializing_app(action="rate_limit")
+        app.installed_meters[1] = {1021}
+        app.meter_support[1] = "unsupported"
+        app.switch_features_handler(SimpleNamespace(msg=SimpleNamespace(datapath=app.datapath)))
+        deletes = [msg for msg in meter_mods(app) if msg.command == ofp.OFPMC_DELETE]
+        self.assertEqual(len(deletes), 1)
+        self.assertEqual((deletes[0].meter_id, deletes[0].flags, deletes[0].bands), (ofp.OFPM_ALL, 0, []))
+        self.assertEqual(len([msg for msg in app._messages
+                              if isinstance(msg, parser.OFPMeterFeaturesStatsRequest)]), 1)
+        self.assertEqual(app.meter_support[1], "unknown")
+        self.assertEqual(app.installed_meters[1], set())
+        self.assertEqual(app.pending_ratelimit_xids[1], {})
+        self.assertEqual(app.offenders[1].offense_count("10.0.0.21"), 0)
 
 
 if __name__ == "__main__":
