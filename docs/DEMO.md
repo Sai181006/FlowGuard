@@ -38,7 +38,7 @@ From the repository root in Ubuntu:
 sudo python3 experiments/demo.py
 ```
 
-The command generates a new `results/demo-YYYYMMDD-HHMMSS` folder. The default traffic is **two sources at 600 packets/s each for eight seconds**. It prints an `ALERT` line with both source addresses and their rates, a `BLOCK` line when the switch confirms the rules, `EXPIRE` lines with blocked-packet counts, and a final summary with detection latency, probe success, and zero remaining drop rules. Normal connectivity and three initial probes per participating host are checked before the flood. The run lasts longer than eight seconds because it waits for rule expiry and tests recovery.
+The command generates a new `results/demo-YYYYMMDD-HHMMSS` folder. The default traffic is **two sources at 600 packets/s each for eight seconds**. Its five numbered phases explain the topology and detector thresholds, show the first qualifying counter window, then print the `ALERT`, each `RULE` request, and the `BLOCK` barrier confirmation. A `VERIFY` line shows a later switch sample with attacker forwarding, drop-rule matches, and the protected client's forwarding rate. `EXPIRE` lines report each rule's final blocked-packet count. The summary gives detection latency, probe success, total blocked packets, and zero remaining drop rules. Normal connectivity and three initial probes per participating host are checked before the flood. The run lasts longer than eight seconds because it waits for rule expiry and tests recovery. The single run demonstrates filtering; the separate matched OFF/ON trials support comparison claims.
 
 Talk track while the command runs:
 

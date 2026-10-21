@@ -33,27 +33,55 @@ def pending_events(path, offset):
     return events, offset
 
 
-def show_event(event):
+def show_event(event, state):
     kind = event.get("type")
-    if kind == "alert":
+    if kind == "sample":
+        sources = event.get("source_pps", {})
+        attackers = sum(sources.get(source, 0) for source in ("10.0.0.21", "10.0.0.22"))
+        qualifying = sum(rate > state["source_threshold"] for rate in sources.values())
+        if (state["flood_seen"] and not state["first_high_seen"]
+                and event.get("victim_pps", 0) > state["victim_threshold"]
+                and qualifying >= state["min_sources"]):
+            print(f"MEASURE first high counter window: victim {event['victim_pps']:.0f} pps; "
+                  f"attackers {attackers:.0f} pps combined", flush=True)
+            print("        Controller waits for a second qualifying window before alerting.", flush=True)
+            state["first_high_seen"] = True
+        dropped = sum(event.get("drop_packet_delta", {}).values())
+        if (state["block_seen"] and not state["post_block_seen"]
+                and dropped > 0 and attackers < 1):
+            print(f"VERIFY  switch counters: attackers forwarded {attackers:.0f} pps; "
+                  f"drop rules matched {dropped} packets in this poll", flush=True)
+            print(f"        Protected client still has a forwarding flow "
+                  f"({sources.get('10.0.0.11', 0):.0f} pps); replies are checked below.", flush=True)
+            state["post_block_seen"] = True
+    elif kind == "alert":
         rates = ", ".join(f"{src}: {rate:.0f} pps" for src, rate in sorted(event["sources"].items()))
-        print(f"ALERT  victim {event['victim']} at {event['victim_pps']:.0f} pps; {rates}", flush=True)
+        print(f"ALERT   two high windows: victim {event['victim']} at "
+              f"{event['victim_pps']:.0f} pps; {rates}", flush=True)
+        print("        Both senders exceeded the source threshold; the client is protected.", flush=True)
+    elif kind == "drop_requested":
+        print(f"RULE    request UDP drop {event['source']} -> "
+              f"{event['victim']}:{event['port']} "
+              f"for {event['hard_timeout_s']} s", flush=True)
     elif kind == "drop_confirmed":
-        print(f"BLOCK  switch confirmed rules for {', '.join(event['sources'])}", flush=True)
+        print(f"BLOCK   OpenFlow barrier confirms switch rules for "
+              f"{', '.join(event['sources'])}", flush=True)
+        state["block_seen"] = True
     elif kind == "drop_removed":
-        print(f"EXPIRE rule for {event['source']} removed; {event['packets']} packets blocked", flush=True)
+        print(f"EXPIRE  rule for {event['source']} removed after timeout; "
+              f"{event['packets']} packets blocked", flush=True)
 
 
-def attack_started(output):
+def attack_event_seen(output, wanted):
     for host in ("a1", "a2"):
         path = output / f"attack-{host}.jsonl"
         if not path.exists():
             return False
         try:
-            first = path.read_text(encoding="utf-8").splitlines()[0]
-            if json.loads(first).get("event") != "start":
+            if not any(json.loads(line).get("event") == wanted
+                       for line in path.read_text(encoding="utf-8").splitlines() if line):
                 return False
-        except (IndexError, json.JSONDecodeError):
+        except json.JSONDecodeError:
             return False
     return True
 
@@ -74,9 +102,18 @@ def main():
         parser.error("output must be a new subdirectory of this repository")
     output.mkdir(parents=True)
 
+    config = json.loads((ROOT / "config" / "detector.json").read_text(encoding="utf-8"))
     print("FlowGuard live demo: private Mininet switch, two UDP senders, one legitimate client", flush=True)
-    print(f"Attack: {args.pps} packets/s per sender for {args.duration_s} s; victim 10.0.0.10:9000", flush=True)
-    print("Starting controller, switch, hosts, and normal connectivity checks...", flush=True)
+    print("Topology: a1 10.0.0.21 + a2 10.0.0.22 -> Open vSwitch s1 "
+          "-> victim 10.0.0.10:9000", flush=True)
+    print("          protected client 10.0.0.11 uses the same victim service", flush=True)
+    print(f"Policy: 1-s counter polls; victim >{config['victim_pps']:g} pps; "
+          f"each source >{config['source_pps']:g} pps; "
+          f"{config['consecutive_windows']} high windows; "
+          f"{config['mitigation_hard_timeout_s']}-s drop timeout", flush=True)
+    print(f"Traffic: {args.pps} UDP packets/s from each attacker for {args.duration_s} s; "
+          "client probes at 10/s", flush=True)
+    print("\n[1/5] BASELINE  starting controller, switch and five hosts...", flush=True)
     command = [sys.executable, "-u", str(ROOT / "experiments" / "run_trial.py"),
                "--mode", "attack-on", "--output", str(output),
                "--pps", str(args.pps), "--duration-s", str(args.duration_s)]
@@ -84,22 +121,34 @@ def main():
         runner = subprocess.Popen(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
         offset = 0
         normal_seen = False
-        flood_seen = False
+        flood_stopped = False
+        state = {"flood_seen": False, "first_high_seen": False,
+                 "block_seen": False, "post_block_seen": False,
+                 "victim_threshold": config["victim_pps"],
+                 "source_threshold": config["source_pps"],
+                 "min_sources": config["min_sources"]}
         try:
             while runner.poll() is None:
                 if not normal_seen and "20/20 received" in (output / "demo-runner.log").read_text(encoding="utf-8"):
-                    print("NORMAL 20/20 host pings succeeded; checking UDP echo flows", flush=True)
+                    print("NORMAL  20/20 host pings succeeded; priming the UDP echo flows", flush=True)
                     normal_seen = True
-                if not flood_seen and attack_started(output):
-                    print("FLOOD  two private sources started; legitimate client continues probing", flush=True)
-                    flood_seen = True
+                if not state["flood_seen"] and attack_event_seen(output, "start"):
+                    print("\n[2/5] FLOOD     both senders started; the client continues probing", flush=True)
+                    state["flood_seen"] = True
                 events, offset = pending_events(output / "controller.jsonl", offset)
                 for event in events:
-                    show_event(event)
+                    if event.get("type") == "alert":
+                        print("\n[3/5] DETECT AND BLOCK", flush=True)
+                    show_event(event, state)
+                if state["flood_seen"] and not flood_stopped and attack_event_seen(output, "stop"):
+                    print("\n[4/5] RECOVERY  flood ended; waiting for the temporary rules to expire", flush=True)
+                    flood_stopped = True
                 time.sleep(0.2)
             events, offset = pending_events(output / "controller.jsonl", offset)
             for event in events:
-                show_event(event)
+                if event.get("type") == "alert":
+                    print("\n[3/5] DETECT AND BLOCK", flush=True)
+                show_event(event, state)
         except KeyboardInterrupt:
             print("Waiting for the trial to clean up Mininet...", flush=True)
             runner.send_signal(2)
@@ -110,14 +159,19 @@ def main():
         print(f"Trial failed (exit {runner.returncode}). Inspect {output / 'demo-runner.log'}", file=sys.stderr)
         return runner.returncode
     summary = summarize_trial(output)
-    print("\nReview summary")
+    events, _ = pending_events(output / "controller.jsonl", 0)
+    blocked_packets = sum(event["packets"] for event in events if event.get("type") == "drop_removed")
+    print("\n[5/5] REVIEW SUMMARY")
     print(f"  Host connectivity: {100 - summary['ping_loss_percent']:.0f}%")
     print(f"  Alert latency: {summary['first_alert_latency_s']:.3f} s")
     print(f"  Switch confirmation: {summary['first_drop_confirmation_latency_s']:.3f} s")
+    print(f"  Attacker packets counted by expired drop rules: {blocked_packets}")
     print(f"  Legitimate probes during attack: {summary['client']['received']}/{summary['client']['sent']}")
     print(f"  Legitimate probes after recovery: {summary['recovery_client']['received']}/{summary['recovery_client']['sent']}")
     print(f"  Drop rules after recovery: {summary['drop_rules_after_recovery']}")
-    print(f"  Evidence: {output}")
+    print("  Interpretation: selective filtering is shown; improved availability "
+          "needs the separate OFF/ON comparison.")
+    print(f"  Evidence: {output.relative_to(ROOT)} (inside this project)")
     return 0
 
 
