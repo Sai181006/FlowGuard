@@ -1,0 +1,7 @@
+# FlowGuard display filter buttons. Embedded quotes use the UAT escape \x22.
+"TRUE","Attack at victim","frame.interface_name == \x22victim-received\x22 && (ip.src == 10.0.0.21 || ip.src == 10.0.0.22)",""
+"TRUE","Client offered","frame.interface_name == \x22client-offered\x22 && ip.src == 10.0.0.11",""
+"TRUE","Client replies","frame.interface_name == \x22client-reply-egress\x22 && ip.src == 10.0.0.10 && ip.dst == 10.0.0.11",""
+"TRUE","FlowGuard CRC errors","flowguard.crc_ok == 0",""
+"TRUE","Native post-queue","udp.dstport == 19000",""
+"TRUE","Native offered","udp.dstport == 19001",""

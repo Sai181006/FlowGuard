@@ -4,3 +4,5 @@
 "Enabled","Client offered","frame.interface_id == 2 && ip.src == 10.0.0.11","#E69F00","Line","Packets","","None","1","Disabled"
 "Enabled","Client forwarded to victim","frame.interface_id == 3 && ip.src == 10.0.0.11","#2E7D32","Line","Packets","","None","1","Disabled"
 "Enabled","Client replies toward client","frame.interface_id == 4 && ip.src == 10.0.0.10 && ip.dst == 10.0.0.11","#8E24AA","Line","Packets","","None","1","Disabled"
+"Enabled","Probe requests offered","flowguard.type == 1 && frame.interface_name == \x22client-offered\x22","#00897B","Line","Packets","","None","1","Disabled"
+"Enabled","Probe replies to client","flowguard && frame.interface_name == \x22client-reply-egress\x22","#5E35B1","Line","Packets","","None","1","Disabled"
