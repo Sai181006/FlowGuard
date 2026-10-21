@@ -1,0 +1,6 @@
+# FlowGuard demo graphs for Wireshark 4.6.9. Interface IDs follow experiments/packet_capture.py.
+"Enabled","Attackers offered","frame.interface_id == 0 || frame.interface_id == 1","#C62828","Line","Packets","","None","1","Disabled"
+"Enabled","Attackers forwarded to victim","frame.interface_id == 3 && (ip.src == 10.0.0.21 || ip.src == 10.0.0.22)","#1565C0","Line","Packets","","None","1","Disabled"
+"Enabled","Client offered","frame.interface_id == 2 && ip.src == 10.0.0.11","#E69F00","Line","Packets","","None","1","Disabled"
+"Enabled","Client forwarded to victim","frame.interface_id == 3 && ip.src == 10.0.0.11","#2E7D32","Line","Packets","","None","1","Disabled"
+"Enabled","Client replies toward client","frame.interface_id == 4 && ip.src == 10.0.0.10 && ip.dst == 10.0.0.11","#8E24AA","Line","Packets","","None","1","Disabled"

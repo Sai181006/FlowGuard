@@ -1,8 +1,8 @@
 # FlowGuard Wireshark review demo
 
 This is a packet-level view of the **real, isolated Mininet trial**. The capture
-records UDP requests at four ports of Open vSwitch `s1`; it does not generate
-fake packets or capture traffic from your physical network.
+records UDP requests and replies at ports of Open vSwitch `s1`; it does not
+generate fake packets or capture traffic from your physical network.
 
 | Wireshark interface name | Observation point | What it proves |
 | --- | --- | --- |
@@ -10,11 +10,13 @@ fake packets or capture traffic from your physical network.
 | `a2-offered` | switch port connected to attacker `10.0.0.22` | attacker 2 continues sending |
 | `client-offered` | switch port connected to client `10.0.0.11` | normal requests continue |
 | `victim-received` | switch port connected to victim `10.0.0.10` | requests forwarded toward the victim |
+| `client-reply-egress` | switch port connected to client `10.0.0.11` | UDP echo replies forwarded toward the client |
 
-All four streams are saved in **one pcapng file**, with interface names that
-Wireshark can filter. Only IPv4 UDP requests addressed to `10.0.0.10:9000`
-are included. Each request can appear at both its sender port and victim port,
-so never treat the whole-file packet count as the number of unique requests.
+All five streams are saved in **one pcapng file**, with interface names that
+Wireshark can filter. The first four streams contain IPv4 UDP requests to
+`10.0.0.10:9000`; the fifth contains UDP echo replies from that service to
+`10.0.0.11`. A request can appear at both its sender port and victim port, so
+never treat the whole-file packet count as the number of unique requests.
 
 ## Option A: open the ready capture
 
@@ -31,9 +33,10 @@ or a Wireshark installation inside Ubuntu.
 
 This saved capture came from a real 8-second, 600-packets/s-per-attacker run.
 The [capture summary](../evidence/m7/flowguard-wireshark-sample-summary.json)
-reports 4,800 requests offered by each attacker, 90 by the client, and 1,669
+reports 4,800 requests offered by each attacker, 90 by the client, and 1,594
 requests seen on the victim-side port over the attack and recovery phases.
-The terminal run independently reported 8,133 packets matched by the switch's
+The revised capture also records 90 replies forwarded toward the client.
+The terminal run independently reported 8,163 packets matched by the switch's
 temporary drop rules. These counters are from different observation points
 and should not be subtracted as if they measured the same interval and stage.
 
@@ -61,6 +64,13 @@ interrupted trial leaves Mininet interfaces behind, run `wsl -d Ubuntu -u root
 
 ## Three-minute Wireshark walkthrough
 
+The **FlowGuard** configuration profile is already installed on this Windows
+machine. In the main Wireshark window, click **Profile: Default** at the bottom
+right and select **FlowGuard**. Reopen **Statistics → I/O Graphs** if it was
+already open. This profile supplies the five named graph lines below. It leaves
+your Default profile unchanged. On another machine, import the profile from
+[`wireshark/FlowGuard`](../wireshark/FlowGuard) or add the filters manually.
+
 1. Open the capture. In the packet list, apply this **display filter**:
 
    ```text
@@ -82,14 +92,15 @@ interrupted trial leaves Mininet interfaces behind, run `wsl -d Ubuntu -u root
    | Attack reaching victim | `frame.interface_name == "victim-received" && (ip.src == 10.0.0.21 || ip.src == 10.0.0.22)` |
    | Client offered | `frame.interface_name == "client-offered" && ip.src == 10.0.0.11` |
    | Client reaching victim | `frame.interface_name == "victim-received" && ip.src == 10.0.0.11` |
+   | Replies toward client | `frame.interface_name == "client-reply-egress" && ip.src == 10.0.0.10 && ip.dst == 10.0.0.11` |
 
    The attack-offered line stays high for eight seconds. The attack-at-victim
    line rises briefly, then falls after the controller's two high counter
    windows and the switch's rule confirmation. The attacker generators keep
-   sending; the reduction is at the switch. The 10-packets/s client lines
-   sit near the bottom on this scale, so temporarily hide the two attacker
-   rows to show that client traffic still reaches the victim. A later short
-   client burst is the recovery probe after the rule timeout.
+   sending; the reduction is at the switch. The 10-packets/s client request
+   and reply lines sit near the bottom on this scale. Temporarily hide the two
+   attacker rows and click **Reset** to show the client lines clearly. The
+   short later burst is the recovery probe after the rule timeout.
 
    In the included capture, the first two attack-offered bins contain about
    1,200 packets each. From the third bin through the eighth, attacker traffic
@@ -110,9 +121,15 @@ interrupted trial leaves Mininet interfaces behind, run `wsl -d Ubuntu -u root
    frame.interface_name == "victim-received" && ip.src == 10.0.0.11
    ```
 
-   The terminal's `80/80` attack-period replies and `10/10` recovery replies
-   are the stronger evidence that the application client succeeded. The
-   capture shows forwarded *requests* only, not UDP echo replies.
+   To show replies on the client-side switch link, use:
+
+   ```text
+   frame.interface_name == "client-reply-egress" && ip.src == 10.0.0.10 && ip.dst == 10.0.0.11
+   ```
+
+   The capture shows replies forwarded toward the client. The terminal's
+   `80/80` attack-period replies and `10/10` recovery replies are the stronger
+   evidence that the application actually received them.
 
 ## What to say during the combined demo
 
@@ -125,9 +142,9 @@ interrupted trial leaves Mininet interfaces behind, run `wsl -d Ubuntu -u root
 > “The red offered line stays high because the attackers keep transmitting.
 > The victim-side attacker line falls because the switch stops forwarding
 > those matching packets. The client is a separate `10.0.0.11` flow; when I
-> show its two lines, its requests still enter and reach the victim. The
-> terminal confirms 80 of 80 replies during the attack and 10 of 10 after
-> the rules expire.”
+> show its three lines, its requests still enter and reach the victim, and
+> echo replies return toward the client. The terminal confirms 80 of 80
+> replies during the attack and 10 of 10 after the rules expire.”
 
 > “This demonstrates selective filtering in our controlled topology. The
 > policy classifies traffic from packet rates and source IPs; it does not
@@ -137,4 +154,5 @@ interrupted trial leaves Mininet interfaces behind, run `wsl -d Ubuntu -u root
 
 The switch drop counters and rule lifecycle are in `controller.jsonl` and
 `flows-during.txt` under the live run's results folder. The Wireshark graph
-shows *where* requests went; the OpenFlow counters quantify rule matches.
+shows *where* requests and client replies went; the OpenFlow counters quantify
+rule matches.

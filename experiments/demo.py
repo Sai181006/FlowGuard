@@ -1,6 +1,7 @@
 """Show one bounded FlowGuard mitigation trial as a live review timeline."""
 
 import argparse
+import errno
 import json
 import os
 import subprocess
@@ -15,12 +16,34 @@ from analyze import summarize_trial
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def read_text_when_available(path):
+    if not path.exists():
+        return ""
+    for _ in range(3):
+        try:
+            return path.read_text(encoding="utf-8")
+        except OSError as exc:
+            if exc.errno != errno.ENODATA:
+                raise
+            time.sleep(0.05)
+    return ""
+
+
 def pending_events(path, offset):
     if not path.exists():
         return [], offset
-    with path.open("rb") as stream:
-        stream.seek(offset)
-        data = stream.read()
+    for _ in range(3):
+        try:
+            with path.open("rb") as stream:
+                stream.seek(offset)
+                data = stream.read()
+            break
+        except OSError as exc:
+            if exc.errno != errno.ENODATA:
+                raise
+            time.sleep(0.05)
+    else:
+        return [], offset
     events = []
     for line in data.splitlines(keepends=True):
         if not line.endswith(b"\n"):
@@ -79,7 +102,7 @@ def attack_event_seen(output, wanted):
             return False
         try:
             if not any(json.loads(line).get("event") == wanted
-                       for line in path.read_text(encoding="utf-8").splitlines() if line):
+                       for line in read_text_when_available(path).splitlines() if line):
                 return False
         except json.JSONDecodeError:
             return False
@@ -93,7 +116,7 @@ def main():
     parser.add_argument("--pps", type=int, default=600)
     parser.add_argument("--duration-s", type=int, default=8)
     parser.add_argument("--pcap", action="store_true",
-                        help="capture four switch ports into a Wireshark pcapng file")
+                        help="capture requests and client replies into a Wireshark pcapng file")
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error("run as root in Ubuntu; Mininet needs network namespaces")
@@ -133,7 +156,7 @@ def main():
                  "min_sources": config["min_sources"]}
         try:
             while runner.poll() is None:
-                if not normal_seen and "20/20 received" in (output / "demo-runner.log").read_text(encoding="utf-8"):
+                if not normal_seen and "20/20 received" in read_text_when_available(output / "demo-runner.log"):
                     print("NORMAL  20/20 host pings succeeded; priming the UDP echo flows", flush=True)
                     normal_seen = True
                 if not state["flood_seen"] and attack_event_seen(output, "start"):
@@ -158,6 +181,15 @@ def main():
             runner.send_signal(2)
             runner.wait(timeout=15)
             raise SystemExit(130)
+        except BaseException:
+            if runner.poll() is None:
+                runner.send_signal(2)
+                try:
+                    runner.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    runner.kill()
+                    runner.wait(timeout=5)
+            raise
 
     if runner.returncode:
         print(f"Trial failed (exit {runner.returncode}). Inspect {output / 'demo-runner.log'}", file=sys.stderr)
@@ -179,8 +211,8 @@ def main():
     if args.pcap:
         capture = json.loads((output / "capture-summary.json").read_text(encoding="utf-8"))
         print(f"  Wireshark file: {output.relative_to(ROOT) / capture['file']}")
-        print("  Captured requests by observation point: " + ", ".join(
-            f"{name}={count}" for name, count in capture["requests_seen"].items()))
+        print("  Captured UDP packets by observation point: " + ", ".join(
+            f"{name}={count}" for name, count in capture["packets_seen"].items()))
         if capture["truncated"]:
             print("  Capture reached its 64 MiB limit; repeat at a lower rate for a full graph.")
     return 0

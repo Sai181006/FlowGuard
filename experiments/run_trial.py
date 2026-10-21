@@ -60,7 +60,7 @@ def main():
     parser.add_argument("--pps", type=int, default=600)
     parser.add_argument("--duration-s", type=int, default=8)
     parser.add_argument("--pcap", action="store_true",
-                        help="save a four-interface Wireshark pcapng during this trial")
+                        help="save requests and client replies in a Wireshark pcapng")
     args = parser.parse_args()
     if not 1 <= args.pps <= 2000 or not 2 <= args.duration_s <= 30:
         parser.error("pps must be 1..2000 and duration-s must be 2..30")

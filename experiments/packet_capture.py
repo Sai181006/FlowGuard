@@ -1,8 +1,7 @@
-"""Capture lab UDP requests from switch ports in one Wireshark-ready pcapng file.
+"""Capture lab UDP requests and client replies in one Wireshark-ready pcapng.
 
 This uses Linux packet sockets so the review demo needs no tcpdump or dumpcap
-inside WSL. Each pcapng interface represents one observation point: a sender's
-switch ingress or the victim's switch egress.
+inside WSL. Each pcapng interface represents a traffic stream at a switch port.
 """
 
 import json
@@ -18,6 +17,7 @@ ETH_P_ALL = 0x0003
 SNAPLEN = 256
 MAX_BYTES = 64 * 1024 * 1024
 VICTIM_IP = socket.inet_aton("10.0.0.10")
+CLIENT_IP = socket.inet_aton("10.0.0.11")
 VICTIM_PORT = 9000
 
 
@@ -34,20 +34,32 @@ def _block(kind, body):
     return struct.pack("<II", kind, length) + body + struct.pack("<I", length)
 
 
-def _is_lab_request(packet):
-    """Keep IPv4 UDP requests to the lab echo service, excluding ARP/replies."""
+def _udp_endpoints(packet):
+    """Return IPv4 and UDP endpoints, or None for other/truncated packets."""
     if len(packet) < 42 or packet[12:14] != b"\x08\x00":
-        return False
+        return None
     ip = 14
     header_length = (packet[ip] & 0x0F) * 4
     if packet[ip] >> 4 != 4 or header_length < 20 or len(packet) < ip + header_length + 8:
-        return False
-    if packet[ip + 9] != 17 or packet[ip + 16:ip + 20] != VICTIM_IP:
-        return False
+        return None
+    if packet[ip + 9] != 17:
+        return None
     # Noninitial IPv4 fragments do not contain the UDP header.
     if int.from_bytes(packet[ip + 6:ip + 8], "big") & 0x1FFF:
+        return None
+    udp = ip + header_length
+    return (packet[ip + 12:ip + 16], packet[ip + 16:ip + 20],
+            int.from_bytes(packet[udp:udp + 2], "big"),
+            int.from_bytes(packet[udp + 2:udp + 4], "big"))
+
+
+def _matches_stream(name, endpoints):
+    if endpoints is None:
         return False
-    return int.from_bytes(packet[ip + header_length + 2:ip + header_length + 4], "big") == VICTIM_PORT
+    source, destination, source_port, destination_port = endpoints
+    if name == "client-reply-egress":
+        return source == VICTIM_IP and destination == CLIENT_IP and source_port == VICTIM_PORT
+    return destination == VICTIM_IP and destination_port == VICTIM_PORT
 
 
 class PacketCapture:
@@ -97,7 +109,7 @@ class PacketCapture:
             while not self._stop.is_set():
                 for key, _ in self._selector.select(timeout=0.1):
                     packet = key.fileobj.recv(65535)
-                    if not _is_lab_request(packet):
+                    if not _matches_stream(key.data, _udp_endpoints(packet)):
                         continue
                     captured = packet[:SNAPLEN]
                     timestamp_us = time.time_ns() // 1000
@@ -126,7 +138,7 @@ class PacketCapture:
         if self._error is not None:
             raise RuntimeError("packet capture failed") from self._error
         return {"file": self.path.name, "interfaces": dict(self.interfaces),
-                "requests_seen": self.counts, "truncated": self.truncated,
+                "packets_seen": self.counts, "truncated": self.truncated,
                 "bytes": self.path.stat().st_size}
 
     @property
@@ -149,7 +161,8 @@ def switch_ports(net):
     switch = net.get("s1")
     ports = {}
     for name, host in (("a1-offered", "a1"), ("a2-offered", "a2"),
-                       ("client-offered", "client"), ("victim-received", "victim")):
+                       ("client-offered", "client"), ("victim-received", "victim"),
+                       ("client-reply-egress", "client")):
         links = switch.connectionsTo(net.get(host))
         if len(links) != 1:
             raise RuntimeError(f"expected one switch link to {host}; found {len(links)}")
