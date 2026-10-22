@@ -1,5 +1,13 @@
 # FlowGuard presentation guide
 
+> **Advanced networking branch.** The dashboard now also offers pulsing,
+> slow-ramp, flash-crowd, three-source and repeat-offender stories, four
+> detectors, rate-limit/graduated responses, back-off and a bottleneck queue
+> ("Tune the model"), plus an offline detector benchmark on the "Behind the
+> scenes" page. Commands and talk tracks: [docs/SCENARIOS.md](docs/SCENARIOS.md)
+> and the 10-minute advanced review in [docs/DEMO.md](docs/DEMO.md#advanced-review-10-minutes).
+> Measured native bottleneck results: [docs/RESULTS.md](docs/RESULTS.md#m9-advanced-results).
+
 The complete Windows/terminal/packet-capture runbook is
 [WINDOWS_DEMO.md](WINDOWS_DEMO.md). It includes an eight-minute presentation
 sequence, native Windows launchers, actual localhost filtering, exact Wireshark

@@ -12,6 +12,7 @@ Before presenting, open PowerShell here and run:
   py -3 demo/terminal.py --doctor
   py -3 -m unittest tests.test_detection tests.test_demo_engine tests.test_live_lab -v
   py -3 demo/live_lab.py
+  py -3 demo/terminal.py --section bottleneck
 
 If py is unavailable, use python or scripts\python-windows.cmd instead.
 
@@ -29,6 +30,19 @@ Native Windows, Npcap and a live OVS integration test still require rehearsal
 on those systems. Existing Mac test evidence is under artifacts/terminal-verified.
 No PCAP is bundled; packet capture was denied by this Mac's capture permissions.
 
+ADVANCED BRANCH (feature/advanced-networking)
+  Dashboard: "Tune the model" selects detector (threshold/EWMA/CUSUM/entropy),
+  response (drop/rate-limit/graduated), back-off and a bottleneck queue.
+  Terminal: demo/terminal.py --section detectors   (offline benchmark table)
+            demo/terminal.py --section bottleneck  (real UDP through an emulated
+            300 packets/s, 50-packet queue, mitigation OFF vs ON)
+  Wireshark: copy wireshark\flowguard.lua to %APPDATA%\Wireshark\plugins\
+  The bottleneck queue is a userspace model, not a Windows network queue.
+  Note: the ZIP in artifacts\ must be rebuilt (scripts/package_demo.py) to
+  contain these files.
+
+Read README.md and docs\SCENARIOS.md for every scenario, docs\TESTING.md for
+what is verified, docs\ARCHITECTURE.md for how it works.
 Read PROJECT_EXPLAINED.md for the simple project explanation and protocols.
 Read VALIDATION.md for exactly what has been tested.
 The original GitHub repository does not yet contain these unpublished local changes.

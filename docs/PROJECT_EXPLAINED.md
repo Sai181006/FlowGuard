@@ -216,3 +216,19 @@ sudo python3 topology/controller_smoke.py
 ~~~
 
 The unit tests exercise detector and forwarding logic. The controller smoke test exercises a live switch connection, host connectivity, UDP flows, and reconnection. The bounded experiment and saved evidence then test the full detection-to-recovery sequence.
+
+## 16. Advanced networking extensions (pointer)
+
+This guide explains the original project. The `feature/advanced-networking`
+additions — EWMA, CUSUM and entropy detectors; OpenFlow 1.3 meter rate
+limiting with fallback to drop; graduated response and back-off; a Mininet
+HTB/netem bottleneck and a native userspace bottleneck; the FGPB binary probe
+with RFC 3550 jitter; and the Wireshark Lua dissector — are documented in:
+
+- [ARCHITECTURE.md](ARCHITECTURE.md): components, schemas, math and OpenFlow message sequences
+- [SCENARIOS.md](SCENARIOS.md): what to run and how to explain it
+- [TESTING.md](TESTING.md): tests, Linux setup, verified vs not verified
+- [RESULTS.md](RESULTS.md#m9-advanced-results): measured native results and the detector benchmark
+
+Sections 1–15 above remain accurate for the default configuration, which
+reproduces the original behaviour exactly.

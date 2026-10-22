@@ -84,3 +84,40 @@ The clean committed-source rehearsal and its observed output are recorded in [M7
 - **How do you know the switch applied the rule?** The controller records a barrier confirmation, and the saved OpenFlow flow table shows each priority-200 drop rule. Expiry events include blocked-packet counters.
 - **What stayed available?** The legitimate client's echo probes succeeded before, during, and after the mitigated attack. In the matched unmitigated trial they also succeeded, so availability improvement is unproven.
 - **What is outside scope?** TCP SYN floods, spoofed addresses, multiple switches, public-network traffic, and production performance.
+
+## Advanced review (10 minutes)
+
+For the feature/advanced-networking additions. Everything in minutes 0–8
+runs on any laptop without root; minute 8–10 needs the Linux lab. Commands
+and expected numbers are explained in [SCENARIOS](SCENARIOS.md); measured
+values are in [RESULTS](RESULTS.md#m9-advanced-results).
+
+| Time | Command / screen | What to say |
+|---|---|---|
+| 0:00–1:00 | `python3 demo/terminal.py --doctor` | "Preflight: Python, offline assets, four detectors and the benchmark load, lab ports free." |
+| 1:00–2:30 | Dashboard → "The pulsing flood", mitigation ON; then Tune the model → Detector = CUSUM | "The original rule needs two consecutive high windows, so a 1 s on / 1 s off attack never alerts. CUSUM accumulates evidence and alerts on the second pulse." |
+| 2:30–3:30 | Dashboard → "The flash crowd", detector threshold then "Traffic-mix divergence" | "Volume detectors block a legitimate surge; the KL divergence of the traffic mix stays near zero because the shares did not change." |
+| 3:30–4:30 | `python3 demo/terminal.py --section detectors` | "Twenty seeded runs per cell: no detector wins every row. This is a simulation with our real detector classes." |
+| 4:30–7:00 | `python3 demo/terminal.py --section bottleneck` (start a loopback capture with `udp portrange 19000-19022` first) | "Now a real availability test: the path to the victim is a 300 pps link with a 50-packet queue. OFF, the flood fills the queue: ~70 % client loss and 166 ms delay, which is 50/300 s. ON, the offenders are filtered before the queue; the residual loss is the two-second detection delay." Committed run: 71.2 % → 23.8 %. |
+| 7:00–8:00 | Wireshark: `udp.dstport == 19001` vs `udp.dstport == 19000`, then `flowguard.kind == "probe"` | "Offered vs delivered; the dissector decodes our FGPB probe header and checks its CRC32." |
+| 8:00–10:00 | Linux lab: `sudo python3 experiments/demo.py --bottleneck --compare --mitigation-action rate_limit` | "Same experiment on Open vSwitch with a kernel HTB/netem bottleneck; the response is now an OpenFlow 1.3 meter. If the switch rejects meters, the controller falls back to drop rules automatically." Committed live run (`results/m8-meter-on`): meters 1021/1022 accepted, 6,735 band drops, client loss 20.0 %. The drop-based compare (`results/m8-bottleneck-compare`) measured 70.0 % → 25.0 % client loss. These are newer than the course report. |
+
+If the Linux lab is unavailable, replace the last row with the saved
+`results/m9-native-graduated-waves` story: rate limit for the first offense
+(10 s), a 20 s drop for the second (back-off), and the third wave absorbed by
+that longer rule.
+
+Questions to expect:
+
+- **Is the native bottleneck a real queue?** It really delays and drops real
+  datagrams, but it is a Python model of a link (D/1 service), not a kernel
+  qdisc. The Mininet `--bottleneck` option uses a real HTB/netem qdisc.
+- **Why did the original project not show availability?** No bottleneck: the
+  M6 client got 80/80 replies even without mitigation.
+- **What does OVS do vs your code?** OVS matches, counts, drops and polices
+  (meters); FlowGuard decides what to install and when. See the
+  [who-implements-what table](ARCHITECTURE.md#2-who-implements-what).
+- **What is unverified?** Meter fallback on a live switch (OVS 3.3.9
+  supports meters), Mininet RED, an OpenFlow control-channel capture, and the
+  Wireshark GUI profile. Meters, the TCLink bottleneck and the dissector were
+  verified live on 22 October 2026 — each configuration once — see [TESTING](TESTING.md#4-what-is-and-is-not-verified).

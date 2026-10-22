@@ -50,7 +50,7 @@ py -3 demo/terminal.py --doctor
 py -3 -m unittest tests.test_detection tests.test_demo_engine tests.test_live_lab -v
 ```
 
-The portable subset contains 21 tests. It checks the detector, dashboard
+The portable subset contains 41 tests (22 October 2026). It checks the detector, dashboard
 engine/server protections, and real-socket forwarding/drop behavior without
 Mininet or OS-Ken. If `py` is unavailable but `python` works, substitute
 `python`, or use `scripts\python-windows.cmd` from Command Prompt.
@@ -226,8 +226,10 @@ and intervals are supported by the
 [official I/O Graphs guide](https://www.wireshark.org/docs/wsug_html_chunked/ChStatIOGraphs.html).
 
 Click a source request. Expand IP and UDP and inspect the payload containing
-`flowguard:a1:attack` or `flowguard:a2:attack`. Click a client packet and inspect
-`ddos-probe`. This demonstrates UDP ports, payloads and request/reply behavior.
+`flowguard:a1:attack` or `flowguard:a2:attack`. Click a client packet: since
+the advanced branch the probe sends a 32-byte binary FGPB header (magic
+`FGPB`, sequence, session, CRC32) instead of the old `ddos-probe` text; load
+the Lua dissector (section 6) to see it decoded. This demonstrates UDP ports, payloads and request/reply behavior.
 Loopback has no physical Ethernet hop; do not expect an ARP exchange here.
 
 A capture cannot label an application's internal action as “DROP.” Establish
@@ -369,7 +371,7 @@ with those fresh `run_trial.py` runs. Keep the native comparison as fallback.
   switch evidence; do not present a manufactured capture as real traffic.
 - **Run fails:** keep its failed summary, inspect the server/client logs and
   rerun into a fresh directory. Do not hide timeout or failed checks.
-- **Rehearse offline on the actual Windows laptop:** doctor PASS, 21 portable
+- **Rehearse offline on the actual Windows laptop:** doctor PASS, 41 portable
   tests PASS, dashboard assets load, live comparison PASS, and a saved PCAP
   if capture is part of the presentation. Keep the ZIP and Mac fallback ready.
 
@@ -377,3 +379,55 @@ The native program and full test suite were verified on this Mac. Python 3.12
 compatibility was also checked here. A native Windows runtime, Npcap capture
 and the revised controller on an actual OVS switch remain unverified until
 they run on those systems.
+
+## 6. Advanced native lab: bottleneck, rate limit and the Lua dissector
+
+The advanced branch adds an emulated bottleneck to the same native lab. It
+needs no extra software. Run it from the extracted folder:
+
+```powershell
+py -3 demo/terminal.py --section bottleneck
+# or directly, choosing a fresh output folder:
+py -3 demo/live_lab.py --bottleneck-pps 300 --queue-packets 50 --output artifacts/bottleneck-1
+py -3 demo/live_lab.py --bottleneck-pps 300 --queue-packets 50 --action rate_limit --output artifacts/ratelimit-1
+py -3 demo/live_lab.py --bottleneck-pps 300 --queue-packets 50 --queue-discipline red --output artifacts/red-1
+py -3 demo/live_lab.py --mitigation on --bottleneck-pps 300 --queue-packets 50 --action graduated --backoff --waves 3 --output artifacts/graduated-1
+```
+
+The gateway's link to the victim (port 19001 → 19000) becomes a 300
+packets/s link with a 50-packet queue inside the Python gateway. With
+mitigation OFF the flood fills the queue and the protected client loses most
+probes; with mitigation ON the offenders are dropped (or policed to 20
+packets/s) **before** the queue. The committed Linux run
+(`results/m9-native-bottleneck`) measured attack-phase client loss 71.2 % OFF
+vs 23.8 % ON and RTT p95 166.7 ms vs 5.2 ms. On Windows, scheduling may shift
+these numbers; the run prints the table from its own measurements. The
+summary line ends `availability_improved: YES` only if ON loss is at least
+10 percentage points lower. This queue is a userspace model, not a Windows
+or Npcap queue.
+
+Wireshark (Npcap loopback adapter, capture filter
+`udp portrange 19000-19022` — equivalent to the port list in section 3):
+
+| Show | Display filter |
+|---|---|
+| Offered to the gateway (before the queue) | `udp.dstport == 19001` |
+| Delivered to the victim (after the queue) | `udp.dstport == 19000` |
+| Client probes (needs the dissector) | `udp.srcport == 19011 && flowguard.kind == "probe"` |
+| One source during the attack (needs the dissector) | `flowguard.source_name == "a1" && flowguard.phase == "attack"` |
+
+In an I/O graph the delivered line flattens at about 300 packets/s while the
+offered line is about 1,200 packets/s (OFF run); queue drops are not visible
+in a capture — read them from `summary.json` (`queue.tail_drops`) or
+`packets.csv` (`QUEUE_TAIL_DROP`).
+
+**Load the FlowGuard dissector on Windows:** copy `wireshark\flowguard.lua` to
+`%APPDATA%\Wireshark\plugins\` (create the folder if needed) and restart
+Wireshark, or start it once with
+`& "$env:ProgramFiles\Wireshark\Wireshark.exe" -X lua_script:wireshark\flowguard.lua`.
+Copy the `wireshark\FlowGuard` folder to `%APPDATA%\Wireshark\profiles\`
+for the I/O graphs and filter buttons ("Native offered", "Native post-queue",
+"FlowGuard CRC errors"). The dissector was checked with TShark 4.2.2 on
+Linux, not yet in Windows Wireshark; confirm in rehearsal that the
+`flowguard` filter turns green. Full field list: [docs/WIRESHARK_DEMO.md](docs/WIRESHARK_DEMO.md#flowguard-lua-dissector).
+Scenario explanations: [docs/SCENARIOS.md](docs/SCENARIOS.md).

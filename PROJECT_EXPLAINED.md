@@ -1,5 +1,13 @@
 # FlowGuard, explained
 
+> **Advanced networking branch.** The dashboard now also offers pulsing,
+> slow-ramp, flash-crowd, three-source and repeat-offender stories, four
+> detectors, rate-limit/graduated responses, back-off and a bottleneck queue
+> ("Tune the model"), plus an offline detector benchmark on the "Behind the
+> scenes" page. Commands and talk tracks: [docs/SCENARIOS.md](docs/SCENARIOS.md)
+> and the 10-minute advanced review in [docs/DEMO.md](docs/DEMO.md#advanced-review-10-minutes).
+> Measured native bottleneck results: [docs/RESULTS.md](docs/RESULTS.md#m9-advanced-results).
+
 FlowGuard is a small software-defined networking (SDN) lab that observes UDP traffic to one protected echo service, detects a sustained multi-source rate, and asks an OpenFlow switch to temporarily drop matching traffic. Its value is in making the full loop inspectable: packet counters, a simple rule, a saved experiment, and a clear account of what each demo does and does not prove. It is not a general DDoS service, and the project does not claim a new detection algorithm.
 
 ## The simple analogy

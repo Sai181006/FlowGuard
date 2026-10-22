@@ -156,3 +156,181 @@ The switch drop counters and rule lifecycle are in `controller.jsonl` and
 `flows-during.txt` under the live run's results folder. The Wireshark graph
 shows *where* requests and client replies went; the OpenFlow counters quantify
 rule matches.
+
+---
+
+# Advanced packet analysis (feature/advanced-networking)
+
+The sections below extend the walkthrough above for the new probe protocol,
+the Lua dissector, the bottleneck experiments and the native lab. Field names
+and filters were checked against [`wireshark/flowguard.lua`](../wireshark/flowguard.lua)
+and the capture code. The dissector was verified on 22 October 2026 with
+**real TShark 4.2.2** (Lua 5.2): it decodes the committed M7 sample (all
+9,600 offered flood frames, 1,504 forwarded floods and 270 legacy probe
+frames), the live M8 captures (in `results/m8-demo-original/flowguard.pcapng`
+all 270 client probe frames decode as FGPB probes with `flowguard.crc_ok`
+true: 90 offered, 90 at the victim, 90 replies), and a synthetic file of
+FGPB probe/flood, bad-CRC, legacy, Mininet and native payloads
+(`tests/test_wireshark_dissector.py`). The Wireshark
+**GUI**, the `FlowGuard` profile's I/O graphs/buttons and Wireshark ≥ 4.4
+(Lua 5.4) have not been opened on this branch.
+
+## FlowGuard Lua dissector
+
+The dissector registers a UDP **heuristic** (it recognises payloads on any
+port) and decodes four payload families:
+
+| Payload | Produced by | `flowguard.kind` | Info column |
+|---|---|---|---|
+| FGPB binary header, `msg_type` 1 | `traffic/probe.py` (default `--format binary`) | `probe` | `FGPB probe seq=7 session=0x1234abcd len=64 crc=ok` |
+| FGPB binary header, `msg_type` 3 | `traffic/flood.py --format binary` | `flood` | `FGPB flood seq=… crc=ok` |
+| `ddos-probe:<seq>:<ns>` | `probe.py --format text`; every recorded M4–M7 trial | `legacy_probe` | `FlowGuard legacy text probe seq=N` |
+| `FLOWGUARD-LAB-ONLY:XXXX…` | `flood.py` default (Mininet floods) | `flood` | `FlowGuard Mininet lab flood (128 bytes)` |
+| `flowguard:<src>:<phase>:<seq>:<ns>....` | native lab sources (`demo/live_lab.py`) | `native_flood` | `FlowGuard native lab a1 phase=attack seq=N` |
+
+### Loading it
+
+| Method | How |
+|---|---|
+| One-off | `wireshark -X lua_script:wireshark/flowguard.lua capture.pcapng` or `tshark -X lua_script:wireshark/flowguard.lua -r capture.pcapng -Y flowguard` |
+| Linux permanent | `mkdir -p ~/.local/lib/wireshark/plugins && cp wireshark/flowguard.lua ~/.local/lib/wireshark/plugins/`, restart Wireshark |
+| Windows permanent | copy `wireshark\flowguard.lua` to `%APPDATA%\Wireshark\plugins\`, restart Wireshark |
+| Check it loaded | **Help → About Wireshark → Plugins** lists `flowguard.lua`; the display filter `flowguard` turns green |
+
+If another dissector claims the port first, use **Analyze → Decode As… → UDP
+port → FLOWGUARD**, or enable the UDP preference "Try heuristic
+sub-dissectors first". The preference **FlowGuard → Validate CRC32** (on by
+default) recomputes the CRC and adds the expert item `flowguard.crc.bad`.
+
+### Installing the FlowGuard profile
+
+Copy the folder [`wireshark/FlowGuard`](../wireshark/FlowGuard) into your
+profiles directory (Linux `~/.config/wireshark/profiles/`, Windows
+`%APPDATA%\Wireshark\profiles\`) and select **Profile: FlowGuard** in the
+status bar. It provides seven I/O-graph lines (the five interface lines of
+the walkthrough above plus "Probe requests offered" =
+`flowguard.type == 1 && frame.interface_name == "client-offered"` and
+"Probe replies to client" = `flowguard && frame.interface_name == "client-reply-egress"`)
+and six filter buttons (Attack at victim, Client offered, Client replies,
+FlowGuard CRC errors, Native post-queue, Native offered). The interface IDs
+0–4 in the profile follow `experiments/packet_capture.py`
+(a1-offered, a2-offered, client-offered, victim-received, client-reply-egress).
+
+**The committed sample predates binary probes.** In
+`evidence/m7/flowguard-wireshark-sample.pcapng` all 90 client requests and 90
+replies are legacy `ddos-probe:` text and the floods are `FLOWGUARD-LAB-ONLY:`
+text (checked by parsing the file). The dissector decodes them as
+`legacy_probe` and `flood`, but every `flowguard.type`/`flowguard.seq`/
+`flowguard.crc_ok` filter — and the two probe graph lines — are empty for that
+file. Use `flowguard.kind == "legacy_probe"` and `flowguard.text_seq` there.
+The live captures in `results/m8-demo-original/` and
+`results/m8-bottleneck-compare/{off,on}/` contain FGPB probes, so every filter
+below works on them. In the bottleneck OFF capture,
+`flowguard.type == 1 && frame.interface_name == "victim-received"` shows only
+34 of the 90 offered probes (24 attack-phase + 10 recovery) — the other 56
+were tail-dropped by the `s1-eth1` queue.
+
+## Which interface to capture
+
+| Runtime | Capture point | How |
+|---|---|---|
+| Mininet / OVS | The pcapng written by `--pcap` (`results/<run>/flowguard.pcapng`): one file, five named interfaces | `sudo python3 experiments/demo.py --pcap` — FlowGuard's own `AF_PACKET` capture, no tcpdump needed |
+| Mininet, manual | `s1-eth1` (victim side) in the root namespace | `sudo tcpdump -i s1-eth1 -nn -w victim.pcap 'udp port 9000'` |
+| Native lab, Linux | `lo` | `sudo dumpcap -i lo -f 'udp portrange 19000-19022' -w native.pcapng` or Wireshark on `lo` |
+| Native lab, Windows | Npcap "Adapter for loopback traffic capture" | see [WINDOWS_DEMO](../WINDOWS_DEMO.md) |
+
+Where the Mininet streams sit relative to the bottleneck
+(`topology/lab_topology.py`): `*-offered` are ingress taps on the senders'
+switch ports, taken before OVS — before any drop rule, meter or queue.
+`victim-received` is taken when the HTB/netem qdisc **dequeues** a frame for
+`s1-eth1`, so it holds exactly the frames that survived the bottleneck,
+timestamped after their queueing delay. A tail drop in the qdisc is visible
+only in `qdisc.jsonl`, never in the capture.
+
+## Capture filters vs display filters
+
+Capture filters (BPF, applied by libpcap/Npcap while capturing; cannot see
+FlowGuard fields): `udp port 9000`, `udp portrange 19000-19022`,
+`tcp port 6653`. Display filters (Wireshark syntax, applied afterwards; can
+use dissector fields):
+
+| Purpose | Display filter |
+|---|---|
+| Everything the dissector recognised | `flowguard` |
+| Flood datagrams only | `flowguard.kind == "flood"` |
+| FGPB probe requests that reached the victim (post-bottleneck) | `flowguard.type == 1 && frame.interface_name == "victim-received"` |
+| Corrupted probes | `flowguard.crc_ok == 0` (expert item `flowguard.crc.bad`) |
+| One probe session | `flowguard.session == 0x1234abcd` |
+| Sequence range around a loss | `flowguard.seq >= 40 && flowguard.seq <= 60 && frame.interface_name == "client-offered"` |
+| Native lab: offered to the gateway (pre-queue) | `udp.dstport == 19001` |
+| Native lab: forwarded to the victim (post-queue) | `udp.dstport == 19000` |
+| Native lab: one source during the attack | `flowguard.source_name == "a1" && flowguard.phase == "attack"` |
+| Native lab: protected client probes | `udp.srcport == 19011 && flowguard.kind == "probe"` |
+
+Finding sequence gaps: Wireshark has no built-in "gap" filter for a custom
+field. Filter `flowguard.type == 1 && frame.interface_name == "client-offered"`,
+add `flowguard.seq` as a column (right-click the field → **Apply as Column**),
+and compare with the same filter on `victim-received`; or export both with
+`tshark … -T fields -e flowguard.seq` and diff the lists. Missing numbers on
+`victim-received` are probes lost at a rule or the queue; `client.csv` marks
+the same sequences `timeout`.
+
+## Reading a bottleneck run
+
+For any time bin of an I/O graph:
+
+```text
+offered (a1-offered + a2-offered + client-offered)
+  − victim-received
+  = packets dropped by FlowGuard rules / OVS meters  (controller.jsonl: drop_packet_delta,
+                                                     ratelimit, meter_sample band_drop_delta)
+  + packets dropped by the s1-eth1 queue            (qdisc.jsonl: root htb "drops")
+  (± packets still queued at the bin edge, ≤ 50, shifted by ≤ ~136 ms)
+```
+
+With mitigation OFF the rule term is zero and the difference is the queue
+loss; with mitigation ON, after confirmation, offered attack traffic stays
+high while victim-received attack traffic falls to zero and the queue drains.
+In the native lab the same identity holds with `udp.dstport == 19001`
+(offered) and `udp.dstport == 19000` (delivered), and the gateway's
+`packets.csv` labels every datagram `FORWARD`, `DROP`, `RL_PASS`, `RL_DROP`,
+`QUEUE_TAIL_DROP` or `QUEUE_RED_DROP` — a capture cannot show those labels.
+
+Note that each native transaction appears several times on `lo` (source →
+gateway, gateway → victim, victim → gateway backend, gateway → source), so
+never count all loopback packets as requests.
+
+## Real packets vs simulated events
+
+| You see | Is it a packet capture? |
+|---|---|
+| Wireshark on a `--pcap` file or on `lo` during `demo/live_lab.py` | **Yes**, real datagrams |
+| Dashboard "Packet desk" rows | **No**; representative rows generated by the model |
+| `experiments/demo.py` timeline lines (`ALERT`, `RULE`, `BLOCK`, `METER`, `EXPIRE`) | **No**; they are controller events from `controller.jsonl` (OpenFlow replies and decisions), not packets |
+| Native lab `packets.csv` | Application log written by the gateway for each datagram it received; not PCAP |
+
+## Capturing the OpenFlow control channel (unverified)
+
+The controller listens on `127.0.0.1:6653` (`controller/run.py`), so the
+OpenFlow messages themselves cross the Linux loopback during a Mininet run.
+This has **not** been attempted on this branch; the steps are expected to work
+with Wireshark's built-in `openflow_v4` dissector:
+
+```bash
+sudo dumpcap -i lo -f 'tcp port 6653' -w openflow.pcapng      # start before experiments/demo.py
+```
+
+| Display filter | Expected content |
+|---|---|
+| `tcp.port == 6653` | the whole control session |
+| `openflow_v4.type == 14` | FLOW_MOD (forwarding, drop and metered rules) |
+| `openflow_v4.type == 29` | METER_MOD (rate limit) |
+| `openflow_v4.type == 18` / `== 19` | MULTIPART request / reply (flow stats every second, meter stats, meter features) |
+| `openflow_v4.type == 20` / `== 21` | BARRIER request / reply (`drop_confirmed`, `ratelimit_confirmed`) |
+| `openflow_v4.type == 1` | ERROR (meter fallback path) |
+| `openflow_v4.type == 11` | FLOW_REMOVED (rule expiry) |
+
+The numbers are the OpenFlow 1.3 message types from
+`os_ken/ofproto/ofproto_v1_3.py`. If Wireshark does not dissect port 6653
+automatically, use **Decode As… → TCP port 6653 → OpenFlow**. The field name `openflow_v4.type` was confirmed in TShark 4.2.2's field list
+(`tshark -G fields`); the live capture itself remains unverified.
