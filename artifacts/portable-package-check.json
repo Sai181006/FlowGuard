@@ -1,7 +1,7 @@
 {
-  "package_sha256": "ae359bc66c4a37686ac29050e899c20d26df0603868111b0e320e81588175639",
-  "platform": "darwin",
-  "python": "3.12.11",
+  "package_sha256": "b0749513345242713fe01fb45c2b689c47aeb0f7504ee870b61170245b10ace3",
+  "platform": "linux",
+  "python": "3.12.3",
   "site_packages_disabled": true,
   "manifest_hashes": "passed",
   "portable_tests": 21,
@@ -13,7 +13,7 @@
     "sent": 5,
     "received": 5,
     "loss_percent": 0.0,
-    "mean_rtt_ms": 0.3284
+    "mean_rtt_ms": 0.2782
   },
   "windows_runtime_verified": false
 }
