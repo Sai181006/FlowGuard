@@ -1,0 +1,268 @@
+{
+  "execution_status": "completed",
+  "started_utc": "2026-10-21T16:35:50.385846+00:00",
+  "provenance": "Real localhost UDP; Python gateway enforcement, not OpenFlow",
+  "mitigation": true,
+  "pps_per_source": 600,
+  "attack_duration_s": 8,
+  "config": {
+    "detector": "cusum",
+    "detectors": {
+      "ewma": {
+        "alpha": 0.2,
+        "k_sigma": 4.0,
+        "sigma_floor_pps": 2.0,
+        "min_rate_pps": 20.0,
+        "warmup_windows": 3,
+        "min_sources": 1
+      },
+      "cusum": {
+        "alpha": 0.2,
+        "drift_k": 0.5,
+        "threshold_h": 6.0,
+        "z_clip": 4.0,
+        "sigma_floor_pps": 2.0,
+        "min_rate_pps": 20.0,
+        "warmup_windows": 3,
+        "min_sources": 1
+      },
+      "entropy": {
+        "alpha": 0.2,
+        "kl_threshold_bits": 0.5,
+        "share_delta": 0.1,
+        "min_victim_pps": 50.0,
+        "smoothing_pps": 0.5,
+        "warmup_windows": 3,
+        "min_sources": 1
+      }
+    },
+    "mitigation": {
+      "action": "drop",
+      "rate_limit_pps": 20,
+      "rate_limit_burst_packets": 20,
+      "graduated_drop_after": 2,
+      "backoff": {
+        "enabled": false,
+        "factor": 2.0,
+        "max_timeout_s": 80,
+        "memory_s": 120
+      }
+    },
+    "poll_interval_s": 1.0,
+    "victim_pps": 100.0,
+    "source_pps": 30.0,
+    "min_sources": 2,
+    "consecutive_windows": 2,
+    "protected_sources": [
+      "10.0.0.11"
+    ],
+    "mitigation_hard_timeout_s": 10
+  },
+  "ports": {
+    "victim": 19000,
+    "gateway": 19001,
+    "backend": 19002,
+    "client": 19011,
+    "a1": 19021,
+    "a2": 19022
+  },
+  "logical_identity_mapping": {
+    "client": "10.0.0.11",
+    "a1": "10.0.0.21",
+    "a2": "10.0.0.22"
+  },
+  "on_wire_address": "127.0.0.1",
+  "platform": "linux",
+  "detector": "cusum",
+  "response_action": "drop",
+  "backoff_enabled": false,
+  "waves": 1,
+  "wave_gap_s": null,
+  "baseline_s": 5,
+  "phase_plan": [
+    {
+      "phase": "baseline",
+      "start_s": 0.0,
+      "end_s": 5.0,
+      "wave": 0
+    },
+    {
+      "phase": "attack",
+      "start_s": 5.0,
+      "end_s": 13.0,
+      "wave": 1
+    },
+    {
+      "phase": "expiry-wait",
+      "start_s": 13.0,
+      "end_s": 24.0,
+      "wave": 0
+    },
+    {
+      "phase": "recovery",
+      "start_s": 24.0,
+      "end_s": null,
+      "wave": 0
+    }
+  ],
+  "probe_mode": "stream",
+  "bottleneck": {
+    "model": "emulated D/1 egress link in the Python gateway (userspace, not a kernel qdisc)",
+    "service_pps": 300.0,
+    "queue_packets": 50,
+    "discipline": "fifo",
+    "red": null,
+    "max_catch_up_s": 0.02
+  },
+  "measurement_started_utc": "2026-10-21T16:35:50.448327+00:00",
+  "finished_utc": "2026-10-21T16:36:16.653175+00:00",
+  "sources": {
+    "client": {
+      "logical_ip": "10.0.0.11",
+      "offered": 260,
+      "forwarded": 260,
+      "dropped": 0,
+      "rate_limit_passed": 0,
+      "rate_limit_dropped": 0,
+      "queue_dropped": 16,
+      "delivered_to_victim": 244,
+      "offenses": 0,
+      "victim_echo_replies": 244,
+      "recovery_echo_replies": 20
+    },
+    "a1": {
+      "logical_ip": "10.0.0.21",
+      "offered": 4814,
+      "forwarded": 1216,
+      "dropped": 3598,
+      "rate_limit_passed": 0,
+      "rate_limit_dropped": 0,
+      "queue_dropped": 589,
+      "delivered_to_victim": 627,
+      "offenses": 1,
+      "victim_echo_replies": 627,
+      "recovery_echo_replies": 4
+    },
+    "a2": {
+      "logical_ip": "10.0.0.22",
+      "offered": 4814,
+      "forwarded": 1216,
+      "dropped": 3598,
+      "rate_limit_passed": 0,
+      "rate_limit_dropped": 0,
+      "queue_dropped": 1169,
+      "delivered_to_victim": 47,
+      "offenses": 1,
+      "victim_echo_replies": 47,
+      "recovery_echo_replies": 4
+    }
+  },
+  "first_alert_s": 7.004240353999194,
+  "alerts": 1,
+  "client": {
+    "sent": 260,
+    "expected": 260,
+    "received": 244,
+    "mean_rtt_ms": 7.462995901639344,
+    "metrics": {
+      "sent": 260,
+      "received": 244,
+      "loss_percent": 6.154,
+      "late": null,
+      "duplicates": null,
+      "reordered": null,
+      "max_consecutive_loss": 7,
+      "rtt_ms": {
+        "min": 3.474,
+        "mean": 7.463,
+        "p50": 4.401,
+        "p95": 5.145,
+        "p99": 166.188,
+        "max": 166.644
+      },
+      "jitter_ms_rfc3550": 0.434
+    },
+    "phases": {
+      "baseline": {
+        "sent": 50,
+        "received": 50,
+        "loss_percent": 0.0,
+        "rtt_ms": {
+          "p50": 4.317,
+          "p95": 4.837,
+          "max": 4.976
+        },
+        "jitter_ms_rfc3550": 0.313
+      },
+      "attack": {
+        "sent": 80,
+        "received": 64,
+        "loss_percent": 20.0,
+        "rtt_ms": {
+          "p50": 4.485,
+          "p95": 166.148,
+          "max": 166.644
+        },
+        "jitter_ms_rfc3550": 0.645
+      },
+      "expiry-wait": {
+        "sent": 110,
+        "received": 110,
+        "loss_percent": 0.0,
+        "rtt_ms": {
+          "p50": 4.405,
+          "p95": 5.115,
+          "max": 5.457
+        },
+        "jitter_ms_rfc3550": 0.337
+      },
+      "recovery": {
+        "sent": 20,
+        "received": 20,
+        "loss_percent": 0.0,
+        "rtt_ms": {
+          "p50": 4.35,
+          "p95": 5.041,
+          "max": 5.161
+        },
+        "jitter_ms_rfc3550": 0.338
+      }
+    }
+  },
+  "queue": {
+    "enqueued": 918,
+    "dequeued": 918,
+    "tail_drops": 1774,
+    "red_drops": 0,
+    "max_depth": 50,
+    "delay_ms": {
+      "p50": 165.384,
+      "p95": 166.472,
+      "max": 166.571
+    },
+    "red_avg": null,
+    "drops_by_source": {
+      "10.0.0.21": 589,
+      "10.0.0.22": 1169,
+      "10.0.0.11": 16
+    },
+    "attack_delay_ms": {
+      "p50": 165.857,
+      "p95": 166.504
+    }
+  },
+  "gateway_errors": {},
+  "checks": {
+    "complete_client_csv": true,
+    "client_loss_measured": true,
+    "client_recovery_all_replied": true,
+    "two_source_alert": true,
+    "expected_filtering": true,
+    "protected_client_never_dropped": true,
+    "rules_expired": true,
+    "source_recovery": true,
+    "no_gateway_errors": true,
+    "every_forward_received_echo": true
+  },
+  "validation_status": "passed"
+}

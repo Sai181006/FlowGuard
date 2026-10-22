@@ -1,0 +1,2 @@
+{"event": "start", "time_utc": "2026-10-22T06:40:54.330032+00:00", "monotonic_s": 1437.121250856, "target": ["10.0.0.10", 9000], "pps": 600, "duration_s": 8.0, "size": 128, "format": "text"}
+{"event": "stop", "time_utc": "2026-10-22T06:41:02.330099+00:00", "monotonic_s": 1445.121347002, "sent": 4800}

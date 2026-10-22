@@ -36,7 +36,12 @@ def main():
 
     checks = {
         "security": run_suite(("test_forwarding.py", "test_demo_engine.py")),
-        "experiment_integrity": run_suite(("test_experiments.py",)),
+        "experiment_integrity": run_suite(("test_experiments.py", "test_qdisc_monitor.py",
+                                           "test_topology.py")),
+        "advanced_networking": run_suite((
+            "test_config.py", "test_detectors.py", "test_mitigation_primitives.py", "test_meters.py",
+            "test_queueing.py", "test_live_lab.py", "test_probe_protocol.py", "test_probe_cli.py",
+            "test_scenarios.py", "test_benchmark.py", "test_wireshark_dissector.py")),
     }
     total_tests = sum(check["tests_run"] for check in checks.values())
     report = {
@@ -46,7 +51,9 @@ def main():
             "The original audit proofs describe the earlier upstream code and are preserved in "
             "audit/reproductions-original.json."
         ),
-        "scope": "Mocked OpenFlow messages, saved experiment artifacts, and local dashboard HTTP checks; no live switch or attack traffic.",
+        "scope": ("Mocked OpenFlow messages (real OS-Ken serializer), saved experiment artifacts, local dashboard "
+                  "HTTP checks, and bounded localhost UDP for the native lab and probe tests; no live switch, "
+                  "kernel qdisc or Wireshark."),
         "checks": checks,
         "total_tests": total_tests,
     }

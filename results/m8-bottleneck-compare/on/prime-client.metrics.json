@@ -1,0 +1,21 @@
+{
+  "format": "binary",
+  "mode": "stream",
+  "session_id": 2439516385,
+  "sent": 3,
+  "received": 3,
+  "loss_percent": 0.0,
+  "late": 0,
+  "duplicates": 0,
+  "reordered": 0,
+  "max_consecutive_loss": 0,
+  "rtt_ms": {
+    "min": 0.503,
+    "mean": 1.863,
+    "p50": 0.785,
+    "p95": 4.299,
+    "p99": 4.299,
+    "max": 4.299
+  },
+  "jitter_ms_rfc3550": 0.224
+}

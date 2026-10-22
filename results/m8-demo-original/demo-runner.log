@@ -1,0 +1,177 @@
+*** Ping: testing ping reachability
+a1 -> a2 a3 client victim 
+a2 -> a1 a3 client victim 
+a3 -> a1 a2 client victim 
+client -> a1 a2 a3 victim 
+victim -> a1 a2 a3 client 
+*** Results: 0% dropped (20/20 received)
+{
+  "mode": "attack-on",
+  "started_utc": "2026-10-22T06:37:53.456126+00:00",
+  "pps_per_attacker": 600,
+  "duration_s": 8,
+  "mitigation_enabled": true,
+  "config": {
+    "detector": "threshold",
+    "detectors": {
+      "ewma": {
+        "alpha": 0.2,
+        "k_sigma": 4.0,
+        "sigma_floor_pps": 2.0,
+        "min_rate_pps": 20.0,
+        "warmup_windows": 3,
+        "min_sources": 1
+      },
+      "cusum": {
+        "alpha": 0.2,
+        "drift_k": 0.5,
+        "threshold_h": 6.0,
+        "z_clip": 4.0,
+        "sigma_floor_pps": 2.0,
+        "min_rate_pps": 20.0,
+        "warmup_windows": 3,
+        "min_sources": 1
+      },
+      "entropy": {
+        "alpha": 0.2,
+        "kl_threshold_bits": 0.5,
+        "share_delta": 0.1,
+        "min_victim_pps": 50.0,
+        "smoothing_pps": 0.5,
+        "warmup_windows": 3,
+        "min_sources": 1
+      }
+    },
+    "mitigation": {
+      "action": "drop",
+      "rate_limit_pps": 20,
+      "rate_limit_burst_packets": 20,
+      "graduated_drop_after": 2,
+      "backoff": {
+        "enabled": false,
+        "factor": 2.0,
+        "max_timeout_s": 80,
+        "memory_s": 120
+      }
+    },
+    "poll_interval_s": 1.0,
+    "victim_pps": 100.0,
+    "source_pps": 30.0,
+    "min_sources": 2,
+    "consecutive_windows": 2,
+    "protected_sources": [
+      "10.0.0.11"
+    ],
+    "mitigation_hard_timeout_s": 10
+  },
+  "config_digest": "634c9b74126d56219d9dd627ae73f6fe79fcef240055ba2f0fb357c960c11397",
+  "config_source": "config/detector.json",
+  "bottleneck": null,
+  "probe_format": "binary",
+  "execution_status": "completed",
+  "validation": {
+    "status": "passed",
+    "checks": {
+      "baseline_connectivity": {
+        "status": "passed",
+        "ping_loss_percent": 0.0
+      },
+      "prime_client": {
+        "status": "passed",
+        "measurement": {
+          "sent": 3,
+          "received": 3,
+          "loss_percent": 0.0,
+          "process_exit": 0
+        }
+      },
+      "prime_a1": {
+        "status": "passed",
+        "measurement": {
+          "sent": 3,
+          "received": 3,
+          "loss_percent": 0.0,
+          "process_exit": 0
+        }
+      },
+      "prime_a2": {
+        "status": "passed",
+        "measurement": {
+          "sent": 3,
+          "received": 3,
+          "loss_percent": 0.0,
+          "process_exit": 0
+        }
+      },
+      "recovery_probe": {
+        "status": "passed",
+        "measurement": {
+          "sent": 10,
+          "received": 10,
+          "loss_percent": 0.0,
+          "process_exit": 0
+        }
+      }
+    }
+  },
+  "measurements": {
+    "prime_client": {
+      "sent": 3,
+      "received": 3,
+      "loss_percent": 0.0,
+      "process_exit": 0
+    },
+    "prime_a1": {
+      "sent": 3,
+      "received": 3,
+      "loss_percent": 0.0,
+      "process_exit": 0
+    },
+    "prime_a2": {
+      "sent": 3,
+      "received": 3,
+      "loss_percent": 0.0,
+      "process_exit": 0
+    },
+    "client": {
+      "sent": 80,
+      "received": 80,
+      "loss_percent": 0.0,
+      "process_exit": 0
+    },
+    "recovery_client": {
+      "sent": 10,
+      "received": 10,
+      "loss_percent": 0.0,
+      "process_exit": 0
+    }
+  },
+  "ping_loss_percent": 0.0,
+  "phase_start_monotonic_s": 1265.446827989,
+  "phase_start_utc": "2026-10-22T06:38:02.655615+00:00",
+  "attack_end_monotonic_s": 1273.584143783,
+  "attack_end_utc": "2026-10-22T06:38:10.792929+00:00",
+  "recovery_probe_exit": 0,
+  "packet_capture": {
+    "file": "flowguard.pcapng",
+    "interfaces": {
+      "a1-offered": "s1-eth3",
+      "a2-offered": "s1-eth4",
+      "client-offered": "s1-eth2",
+      "victim-received": "s1-eth1",
+      "client-reply-egress": "s1-eth2"
+    },
+    "packets_seen": {
+      "a1-offered": 4800,
+      "a2-offered": 4800,
+      "client-offered": 90,
+      "victim-received": 2294,
+      "client-reply-egress": 90
+    },
+    "truncated": false,
+    "bytes": 2446256
+  },
+  "finished_utc": "2026-10-22T06:38:24.030328+00:00",
+  "finished_monotonic_s": 1286.821578108,
+  "status": "completed"
+}

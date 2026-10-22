@@ -2,3 +2,4 @@
 *.csv whitespace=cr-at-eol
 # Keep vendored font licenses in their upstream formatting.
 dashboard/assets/fonts/*-LICENSE.txt -whitespace
+*.pcapng binary

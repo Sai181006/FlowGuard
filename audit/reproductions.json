@@ -2,18 +2,23 @@
   "status": "passed",
   "purpose": "Current regression checks verify hardening and experiment-integrity behavior.",
   "historical_note": "The original audit proofs describe the earlier upstream code and are preserved in audit/reproductions-original.json.",
-  "scope": "Mocked OpenFlow messages, saved experiment artifacts, and local dashboard HTTP checks; no live switch or attack traffic.",
+  "scope": "Mocked OpenFlow messages (real OS-Ken serializer), saved experiment artifacts, local dashboard HTTP checks, and bounded localhost UDP for the native lab and probe tests; no live switch, kernel qdisc or Wireshark.",
   "checks": {
     "security": {
       "status": "passed",
-      "tests_run": 32,
+      "tests_run": 67,
       "failures": []
     },
     "experiment_integrity": {
       "status": "passed",
-      "tests_run": 9,
+      "tests_run": 43,
+      "failures": []
+    },
+    "advanced_networking": {
+      "status": "passed",
+      "tests_run": 113,
       "failures": []
     }
   },
-  "total_tests": 41
+  "total_tests": 223
 }

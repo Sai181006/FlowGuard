@@ -8,18 +8,44 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-FOLDERS = ("config", "controller", "dashboard", "demo", "experiments", "scripts",
-           "tests", "topology", "traffic", "results", "audit")
+FOLDERS = ("config", "controller", "dashboard", "demo", "docs", "experiments", "scripts",
+           "tests", "topology", "traffic", "results", "audit", "wireshark")
+# Git-ignored ad-hoc run folders (see .gitignore); used only when git is unavailable.
+# results/m8-* is also git-ignored, but the committed live evidence uses that prefix,
+# so it is kept here; with git, only tracked or non-ignored files are packaged.
+IGNORED_RESULT_PREFIXES = ("demo-", "review-", "m7-", "native-")
 ARTIFACTS = ("flowguard-dashboard.png", "flowguard-presentation.png", "offline-asset-check.json",
              "terminal-preflight.json", "terminal-python312.txt", "terminal-verified")
 
 
+def git_visible_files():
+    """Tracked plus untracked-but-not-ignored files, or None outside a git checkout."""
+    try:
+        output = subprocess.check_output(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+            cwd=ROOT, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return {(ROOT / name).resolve() for name in output.decode("utf-8").split("\0") if name}
+
+
+def ignored_run_folder(path):
+    """True for files inside git-ignored, uncommitted run folders such as results/native-*."""
+    parts = path.relative_to(ROOT).parts
+    if parts[0] != "results" or len(parts) < 2:
+        return False
+    # Hidden files such as a leftover ".<run>.demo-runner.log" are never committed.
+    return path.name.startswith(".") or (len(parts) > 2 and parts[1].startswith(IGNORED_RESULT_PREFIXES))
+
+
 def sources():
+    visible = git_visible_files()
     files = {p for p in ROOT.iterdir() if p.is_file() and
              (p.suffix in {".md", ".cmd", ".command", ".in", ".txt"} or p.name in {"LICENSE", ".gitignore", ".gitattributes"})}
     for name in FOLDERS:
         files.update(p for p in (ROOT / name).rglob("*") if p.is_file() and
-                     "__pycache__" not in p.parts and not p.is_symlink())
+                     "__pycache__" not in p.parts and not p.is_symlink()
+                     and (p.resolve() in visible if visible is not None else not ignored_run_folder(p)))
     for name in ARTIFACTS:
         item = ROOT / "artifacts" / name
         if item.is_file():

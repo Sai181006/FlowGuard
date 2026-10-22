@@ -1,0 +1,2 @@
+sent=260 received=242 loss=6.9%
+metrics p50=4.372 p95=5.027 p99=96.749 jitter=0.343

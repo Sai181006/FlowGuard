@@ -1,0 +1,504 @@
+{
+  "off": {
+    "execution_status": "completed",
+    "started_utc": "2026-10-21T16:37:10.211784+00:00",
+    "provenance": "Real localhost UDP; Python gateway enforcement, not OpenFlow",
+    "mitigation": false,
+    "pps_per_source": 600,
+    "attack_duration_s": 8,
+    "config": {
+      "detector": "threshold",
+      "detectors": {
+        "ewma": {
+          "alpha": 0.2,
+          "k_sigma": 4.0,
+          "sigma_floor_pps": 2.0,
+          "min_rate_pps": 20.0,
+          "warmup_windows": 3,
+          "min_sources": 1
+        },
+        "cusum": {
+          "alpha": 0.2,
+          "drift_k": 0.5,
+          "threshold_h": 6.0,
+          "z_clip": 4.0,
+          "sigma_floor_pps": 2.0,
+          "min_rate_pps": 20.0,
+          "warmup_windows": 3,
+          "min_sources": 1
+        },
+        "entropy": {
+          "alpha": 0.2,
+          "kl_threshold_bits": 0.5,
+          "share_delta": 0.1,
+          "min_victim_pps": 50.0,
+          "smoothing_pps": 0.5,
+          "warmup_windows": 3,
+          "min_sources": 1
+        }
+      },
+      "mitigation": {
+        "action": "drop",
+        "rate_limit_pps": 20,
+        "rate_limit_burst_packets": 20,
+        "graduated_drop_after": 2,
+        "backoff": {
+          "enabled": false,
+          "factor": 2.0,
+          "max_timeout_s": 80,
+          "memory_s": 120
+        }
+      },
+      "poll_interval_s": 1.0,
+      "victim_pps": 100.0,
+      "source_pps": 30.0,
+      "min_sources": 2,
+      "consecutive_windows": 2,
+      "protected_sources": [
+        "10.0.0.11"
+      ],
+      "mitigation_hard_timeout_s": 10
+    },
+    "ports": {
+      "victim": 19000,
+      "gateway": 19001,
+      "backend": 19002,
+      "client": 19011,
+      "a1": 19021,
+      "a2": 19022
+    },
+    "logical_identity_mapping": {
+      "client": "10.0.0.11",
+      "a1": "10.0.0.21",
+      "a2": "10.0.0.22"
+    },
+    "on_wire_address": "127.0.0.1",
+    "platform": "linux",
+    "detector": "threshold",
+    "response_action": "drop",
+    "backoff_enabled": false,
+    "waves": 1,
+    "wave_gap_s": null,
+    "baseline_s": 2,
+    "phase_plan": [
+      {
+        "phase": "baseline",
+        "start_s": 0.0,
+        "end_s": 2.0,
+        "wave": 0
+      },
+      {
+        "phase": "attack",
+        "start_s": 2.0,
+        "end_s": 10.0,
+        "wave": 1
+      },
+      {
+        "phase": "expiry-wait",
+        "start_s": 10.0,
+        "end_s": 21.0,
+        "wave": 0
+      },
+      {
+        "phase": "recovery",
+        "start_s": 21.0,
+        "end_s": null,
+        "wave": 0
+      }
+    ],
+    "probe_mode": "stopwait",
+    "bottleneck": null,
+    "measurement_started_utc": "2026-10-21T16:37:10.274162+00:00",
+    "finished_utc": "2026-10-21T16:37:33.477928+00:00",
+    "sources": {
+      "client": {
+        "logical_ip": "10.0.0.11",
+        "offered": 230,
+        "forwarded": 230,
+        "dropped": 0,
+        "rate_limit_passed": 0,
+        "rate_limit_dropped": 0,
+        "queue_dropped": 0,
+        "delivered_to_victim": 230,
+        "offenses": 0,
+        "victim_echo_replies": 230,
+        "recovery_echo_replies": 21
+      },
+      "a1": {
+        "logical_ip": "10.0.0.21",
+        "offered": 4807,
+        "forwarded": 4807,
+        "dropped": 0,
+        "rate_limit_passed": 0,
+        "rate_limit_dropped": 0,
+        "queue_dropped": 0,
+        "delivered_to_victim": 4807,
+        "offenses": 0,
+        "victim_echo_replies": 4807,
+        "recovery_echo_replies": 4
+      },
+      "a2": {
+        "logical_ip": "10.0.0.22",
+        "offered": 4807,
+        "forwarded": 4807,
+        "dropped": 0,
+        "rate_limit_passed": 0,
+        "rate_limit_dropped": 0,
+        "queue_dropped": 0,
+        "delivered_to_victim": 4807,
+        "offenses": 0,
+        "victim_echo_replies": 4807,
+        "recovery_echo_replies": 4
+      }
+    },
+    "first_alert_s": 4.001464758999646,
+    "alerts": 1,
+    "client": {
+      "sent": 230,
+      "expected": 230,
+      "received": 230,
+      "mean_rtt_ms": 0.5519826086956522,
+      "metrics": {
+        "sent": 230,
+        "received": 230,
+        "loss_percent": 0.0,
+        "late": null,
+        "duplicates": null,
+        "reordered": null,
+        "max_consecutive_loss": 0,
+        "rtt_ms": {
+          "min": 0.25,
+          "mean": 0.552,
+          "p50": 0.542,
+          "p95": 0.762,
+          "p99": 0.883,
+          "max": 1.054
+        },
+        "jitter_ms_rfc3550": 0.136
+      },
+      "phases": {
+        "baseline": {
+          "sent": 20,
+          "received": 20,
+          "loss_percent": 0.0,
+          "rtt_ms": {
+            "p50": 0.613,
+            "p95": 0.764,
+            "max": 0.811
+          },
+          "jitter_ms_rfc3550": 0.092
+        },
+        "attack": {
+          "sent": 80,
+          "received": 80,
+          "loss_percent": 0.0,
+          "rtt_ms": {
+            "p50": 0.448,
+            "p95": 0.591,
+            "max": 0.683
+          },
+          "jitter_ms_rfc3550": 0.097
+        },
+        "expiry-wait": {
+          "sent": 109,
+          "received": 109,
+          "loss_percent": 0.0,
+          "rtt_ms": {
+            "p50": 0.609,
+            "p95": 0.815,
+            "max": 1.054
+          },
+          "jitter_ms_rfc3550": 0.102
+        },
+        "recovery": {
+          "sent": 21,
+          "received": 21,
+          "loss_percent": 0.0,
+          "rtt_ms": {
+            "p50": 0.6,
+            "p95": 0.795,
+            "max": 0.851
+          },
+          "jitter_ms_rfc3550": 0.107
+        }
+      }
+    },
+    "queue": null,
+    "gateway_errors": {},
+    "checks": {
+      "complete_client_csv": true,
+      "protected_client_all_replied": true,
+      "two_source_alert": true,
+      "expected_filtering": true,
+      "protected_client_never_dropped": true,
+      "rules_expired": true,
+      "source_recovery": true,
+      "no_gateway_errors": true,
+      "every_forward_received_echo": true
+    },
+    "validation_status": "passed"
+  },
+  "on": {
+    "execution_status": "completed",
+    "started_utc": "2026-10-21T16:37:33.494916+00:00",
+    "provenance": "Real localhost UDP; Python gateway enforcement, not OpenFlow",
+    "mitigation": true,
+    "pps_per_source": 600,
+    "attack_duration_s": 8,
+    "config": {
+      "detector": "threshold",
+      "detectors": {
+        "ewma": {
+          "alpha": 0.2,
+          "k_sigma": 4.0,
+          "sigma_floor_pps": 2.0,
+          "min_rate_pps": 20.0,
+          "warmup_windows": 3,
+          "min_sources": 1
+        },
+        "cusum": {
+          "alpha": 0.2,
+          "drift_k": 0.5,
+          "threshold_h": 6.0,
+          "z_clip": 4.0,
+          "sigma_floor_pps": 2.0,
+          "min_rate_pps": 20.0,
+          "warmup_windows": 3,
+          "min_sources": 1
+        },
+        "entropy": {
+          "alpha": 0.2,
+          "kl_threshold_bits": 0.5,
+          "share_delta": 0.1,
+          "min_victim_pps": 50.0,
+          "smoothing_pps": 0.5,
+          "warmup_windows": 3,
+          "min_sources": 1
+        }
+      },
+      "mitigation": {
+        "action": "drop",
+        "rate_limit_pps": 20,
+        "rate_limit_burst_packets": 20,
+        "graduated_drop_after": 2,
+        "backoff": {
+          "enabled": false,
+          "factor": 2.0,
+          "max_timeout_s": 80,
+          "memory_s": 120
+        }
+      },
+      "poll_interval_s": 1.0,
+      "victim_pps": 100.0,
+      "source_pps": 30.0,
+      "min_sources": 2,
+      "consecutive_windows": 2,
+      "protected_sources": [
+        "10.0.0.11"
+      ],
+      "mitigation_hard_timeout_s": 10
+    },
+    "ports": {
+      "victim": 19000,
+      "gateway": 19001,
+      "backend": 19002,
+      "client": 19011,
+      "a1": 19021,
+      "a2": 19022
+    },
+    "logical_identity_mapping": {
+      "client": "10.0.0.11",
+      "a1": "10.0.0.21",
+      "a2": "10.0.0.22"
+    },
+    "on_wire_address": "127.0.0.1",
+    "platform": "linux",
+    "detector": "threshold",
+    "response_action": "drop",
+    "backoff_enabled": false,
+    "waves": 1,
+    "wave_gap_s": null,
+    "baseline_s": 2,
+    "phase_plan": [
+      {
+        "phase": "baseline",
+        "start_s": 0.0,
+        "end_s": 2.0,
+        "wave": 0
+      },
+      {
+        "phase": "attack",
+        "start_s": 2.0,
+        "end_s": 10.0,
+        "wave": 1
+      },
+      {
+        "phase": "expiry-wait",
+        "start_s": 10.0,
+        "end_s": 21.0,
+        "wave": 0
+      },
+      {
+        "phase": "recovery",
+        "start_s": 21.0,
+        "end_s": null,
+        "wave": 0
+      }
+    ],
+    "probe_mode": "stopwait",
+    "bottleneck": null,
+    "measurement_started_utc": "2026-10-21T16:37:33.556943+00:00",
+    "finished_utc": "2026-10-21T16:37:56.760346+00:00",
+    "sources": {
+      "client": {
+        "logical_ip": "10.0.0.11",
+        "offered": 230,
+        "forwarded": 230,
+        "dropped": 0,
+        "rate_limit_passed": 0,
+        "rate_limit_dropped": 0,
+        "queue_dropped": 0,
+        "delivered_to_victim": 230,
+        "offenses": 0,
+        "victim_echo_replies": 230,
+        "recovery_echo_replies": 21
+      },
+      "a1": {
+        "logical_ip": "10.0.0.21",
+        "offered": 4808,
+        "forwarded": 1210,
+        "dropped": 3598,
+        "rate_limit_passed": 0,
+        "rate_limit_dropped": 0,
+        "queue_dropped": 0,
+        "delivered_to_victim": 1210,
+        "offenses": 1,
+        "victim_echo_replies": 1210,
+        "recovery_echo_replies": 4
+      },
+      "a2": {
+        "logical_ip": "10.0.0.22",
+        "offered": 4808,
+        "forwarded": 1210,
+        "dropped": 3598,
+        "rate_limit_passed": 0,
+        "rate_limit_dropped": 0,
+        "queue_dropped": 0,
+        "delivered_to_victim": 1210,
+        "offenses": 1,
+        "victim_echo_replies": 1210,
+        "recovery_echo_replies": 4
+      }
+    },
+    "first_alert_s": 4.002434418998746,
+    "alerts": 1,
+    "client": {
+      "sent": 230,
+      "expected": 230,
+      "received": 230,
+      "mean_rtt_ms": 0.5863130434782609,
+      "metrics": {
+        "sent": 230,
+        "received": 230,
+        "loss_percent": 0.0,
+        "late": null,
+        "duplicates": null,
+        "reordered": null,
+        "max_consecutive_loss": 0,
+        "rtt_ms": {
+          "min": 0.235,
+          "mean": 0.586,
+          "p50": 0.589,
+          "p95": 0.785,
+          "p99": 0.921,
+          "max": 0.989
+        },
+        "jitter_ms_rfc3550": 0.111
+      },
+      "phases": {
+        "baseline": {
+          "sent": 20,
+          "received": 20,
+          "loss_percent": 0.0,
+          "rtt_ms": {
+            "p50": 0.594,
+            "p95": 0.785,
+            "max": 0.813
+          },
+          "jitter_ms_rfc3550": 0.081
+        },
+        "attack": {
+          "sent": 80,
+          "received": 80,
+          "loss_percent": 0.0,
+          "rtt_ms": {
+            "p50": 0.5,
+            "p95": 0.699,
+            "max": 0.989
+          },
+          "jitter_ms_rfc3550": 0.092
+        },
+        "expiry-wait": {
+          "sent": 109,
+          "received": 109,
+          "loss_percent": 0.0,
+          "rtt_ms": {
+            "p50": 0.621,
+            "p95": 0.799,
+            "max": 0.931
+          },
+          "jitter_ms_rfc3550": 0.087
+        },
+        "recovery": {
+          "sent": 21,
+          "received": 21,
+          "loss_percent": 0.0,
+          "rtt_ms": {
+            "p50": 0.598,
+            "p95": 0.721,
+            "max": 0.746
+          },
+          "jitter_ms_rfc3550": 0.084
+        }
+      }
+    },
+    "queue": null,
+    "gateway_errors": {},
+    "checks": {
+      "complete_client_csv": true,
+      "protected_client_all_replied": true,
+      "two_source_alert": true,
+      "expected_filtering": true,
+      "protected_client_never_dropped": true,
+      "rules_expired": true,
+      "source_recovery": true,
+      "no_gateway_errors": true,
+      "every_forward_received_echo": true
+    },
+    "validation_status": "passed"
+  },
+  "comparison": {
+    "attack_phase": {
+      "off": {
+        "client_loss_percent": 0.0,
+        "client_probes": 80,
+        "rtt_p95_ms": 0.591,
+        "jitter_ms_rfc3550": 0.097,
+        "queue_drops": null,
+        "queue_delay_p95_ms": null,
+        "gateway_drops": 0
+      },
+      "on": {
+        "client_loss_percent": 0.0,
+        "client_probes": 80,
+        "rtt_p95_ms": 0.699,
+        "jitter_ms_rfc3550": 0.092,
+        "queue_drops": null,
+        "queue_delay_p95_ms": null,
+        "gateway_drops": 7196
+      }
+    },
+    "availability_improved": null,
+    "reason": "not applicable: no bottleneck, so the flood cannot congest the client path"
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "poll_interval_s": 1.0,
+  "victim_pps": 100.0,
+  "source_pps": 30.0,
+  "min_sources": 2,
+  "consecutive_windows": 2,
+  "protected_sources": [
+    "10.0.0.11"
+  ],
+  "mitigation_hard_timeout_s": 10,
+  "detector": "threshold",
+  "detectors": {
+    "ewma": {
+      "alpha": 0.2,
+      "k_sigma": 4.0,
+      "sigma_floor_pps": 2.0,
+      "min_rate_pps": 20.0,
+      "warmup_windows": 3,
+      "min_sources": 1
+    },
+    "cusum": {
+      "alpha": 0.2,
+      "drift_k": 0.5,
+      "threshold_h": 6.0,
+      "z_clip": 4.0,
+      "sigma_floor_pps": 2.0,
+      "min_rate_pps": 20.0,
+      "warmup_windows": 3,
+      "min_sources": 1
+    },
+    "entropy": {
+      "alpha": 0.2,
+      "kl_threshold_bits": 0.5,
+      "share_delta": 0.1,
+      "min_victim_pps": 50.0,
+      "smoothing_pps": 0.5,
+      "warmup_windows": 3,
+      "min_sources": 1
+    }
+  },
+  "mitigation": {
+    "action": "rate_limit",
+    "rate_limit_pps": 20,
+    "rate_limit_burst_packets": 20,
+    "graduated_drop_after": 2,
+    "backoff": {
+      "enabled": false,
+      "factor": 2.0,
+      "max_timeout_s": 80,
+      "memory_s": 120
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "file": "flowguard.pcapng",
+  "interfaces": {
+    "a1-offered": "s1-eth3",
+    "a2-offered": "s1-eth4",
+    "client-offered": "s1-eth2",
+    "victim-received": "s1-eth1",
+    "client-reply-egress": "s1-eth2"
+  },
+  "packets_seen": {
+    "a1-offered": 4800,
+    "a2-offered": 4800,
+    "client-offered": 90,
+    "victim-received": 904,
+    "client-reply-egress": 70
+  },
+  "truncated": false,
+  "bytes": 2161176
+}

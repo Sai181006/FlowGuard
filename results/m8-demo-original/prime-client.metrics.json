@@ -1,0 +1,21 @@
+{
+  "format": "binary",
+  "mode": "stopwait",
+  "session_id": 2141987996,
+  "sent": 3,
+  "received": 3,
+  "loss_percent": 0.0,
+  "late": 0,
+  "duplicates": 0,
+  "reordered": 0,
+  "max_consecutive_loss": 0,
+  "rtt_ms": {
+    "min": 0.417,
+    "mean": 1.997,
+    "p50": 0.992,
+    "p95": 4.581,
+    "p99": 4.581,
+    "max": 4.581
+  },
+  "jitter_ms_rfc3550": 0.246
+}

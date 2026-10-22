@@ -1,0 +1,207 @@
+{
+  "mode": "attack-on",
+  "started_utc": "2026-10-22T06:40:46.362868+00:00",
+  "pps_per_attacker": 600,
+  "duration_s": 8,
+  "mitigation_enabled": true,
+  "config": {
+    "detector": "threshold",
+    "detectors": {
+      "ewma": {
+        "alpha": 0.2,
+        "k_sigma": 4.0,
+        "sigma_floor_pps": 2.0,
+        "min_rate_pps": 20.0,
+        "warmup_windows": 3,
+        "min_sources": 1
+      },
+      "cusum": {
+        "alpha": 0.2,
+        "drift_k": 0.5,
+        "threshold_h": 6.0,
+        "z_clip": 4.0,
+        "sigma_floor_pps": 2.0,
+        "min_rate_pps": 20.0,
+        "warmup_windows": 3,
+        "min_sources": 1
+      },
+      "entropy": {
+        "alpha": 0.2,
+        "kl_threshold_bits": 0.5,
+        "share_delta": 0.1,
+        "min_victim_pps": 50.0,
+        "smoothing_pps": 0.5,
+        "warmup_windows": 3,
+        "min_sources": 1
+      }
+    },
+    "mitigation": {
+      "action": "drop",
+      "rate_limit_pps": 20,
+      "rate_limit_burst_packets": 20,
+      "graduated_drop_after": 2,
+      "backoff": {
+        "enabled": false,
+        "factor": 2.0,
+        "max_timeout_s": 80,
+        "memory_s": 120
+      }
+    },
+    "poll_interval_s": 1.0,
+    "victim_pps": 100.0,
+    "source_pps": 30.0,
+    "min_sources": 2,
+    "consecutive_windows": 2,
+    "protected_sources": [
+      "10.0.0.11"
+    ],
+    "mitigation_hard_timeout_s": 10
+  },
+  "config_digest": "634c9b74126d56219d9dd627ae73f6fe79fcef240055ba2f0fb357c960c11397",
+  "config_source": "config/detector.json",
+  "bottleneck": {
+    "device": "s1-eth1",
+    "mbit": 0.5,
+    "queue_packets": 50,
+    "qdisc": "fifo"
+  },
+  "probe_format": "binary",
+  "execution_status": "completed",
+  "validation": {
+    "status": "passed",
+    "checks": {
+      "bottleneck_qdisc": {
+        "status": "passed",
+        "problems": [],
+        "kinds": [
+          "htb",
+          "netem"
+        ]
+      },
+      "baseline_connectivity": {
+        "status": "passed",
+        "ping_loss_percent": 0.0
+      },
+      "prime_client": {
+        "status": "passed",
+        "measurement": {
+          "sent": 3,
+          "received": 3,
+          "loss_percent": 0.0,
+          "process_exit": 0
+        }
+      },
+      "prime_a1": {
+        "status": "passed",
+        "measurement": {
+          "sent": 3,
+          "received": 3,
+          "loss_percent": 0.0,
+          "process_exit": 0
+        }
+      },
+      "prime_a2": {
+        "status": "passed",
+        "measurement": {
+          "sent": 3,
+          "received": 3,
+          "loss_percent": 0.0,
+          "process_exit": 0
+        }
+      },
+      "recovery_probe": {
+        "status": "passed",
+        "measurement": {
+          "sent": 10,
+          "received": 10,
+          "loss_percent": 0.0,
+          "process_exit": 0
+        }
+      },
+      "bottleneck_qdisc_after": {
+        "status": "passed",
+        "problems": [],
+        "root": {
+          "kind": "htb",
+          "handle": "5:",
+          "parent": "root",
+          "packets": 952,
+          "bytes": 153840,
+          "drops": 1721,
+          "overlimits": 824,
+          "requeues": 0,
+          "backlog_bytes": 0,
+          "qlen": 0
+        }
+      }
+    }
+  },
+  "measurements": {
+    "prime_client": {
+      "sent": 3,
+      "received": 3,
+      "loss_percent": 0.0,
+      "process_exit": 0
+    },
+    "prime_a1": {
+      "sent": 3,
+      "received": 3,
+      "loss_percent": 0.0,
+      "process_exit": 0
+    },
+    "prime_a2": {
+      "sent": 3,
+      "received": 3,
+      "loss_percent": 0.0,
+      "process_exit": 0
+    },
+    "client": {
+      "sent": 80,
+      "received": 60,
+      "loss_percent": 25.0,
+      "process_exit": 1
+    },
+    "recovery_client": {
+      "sent": 10,
+      "received": 10,
+      "loss_percent": 0.0,
+      "process_exit": 0
+    }
+  },
+  "probe_mode": "stream",
+  "ping_loss_percent": 0.0,
+  "phase_start_monotonic_s": 1437.0614558,
+  "phase_start_utc": "2026-10-22T06:40:54.270237+00:00",
+  "attack_end_monotonic_s": 1445.15683584,
+  "attack_end_utc": "2026-10-22T06:41:02.365619+00:00",
+  "recovery_probe_exit": 0,
+  "packet_capture": {
+    "file": "flowguard.pcapng",
+    "interfaces": {
+      "a1-offered": "s1-eth3",
+      "a2-offered": "s1-eth4",
+      "client-offered": "s1-eth2",
+      "victim-received": "s1-eth1",
+      "client-reply-egress": "s1-eth2"
+    },
+    "packets_seen": {
+      "a1-offered": 4800,
+      "a2-offered": 4800,
+      "client-offered": 90,
+      "victim-received": 904,
+      "client-reply-egress": 70
+    },
+    "truncated": false,
+    "bytes": 2161176
+  },
+  "qdisc_monitor": {
+    "file": "qdisc.jsonl",
+    "dev": "s1-eth1",
+    "interval_s": 0.5,
+    "samples": 43,
+    "errors": 0
+  },
+  "finished_utc": "2026-10-22T06:41:15.505678+00:00",
+  "finished_monotonic_s": 1458.296908224,
+  "status": "completed"
+}
