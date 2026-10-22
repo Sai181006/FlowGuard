@@ -1,0 +1,188 @@
+{
+  "mode": "attack-on",
+  "started_utc": "2026-10-22T06:41:27.478196+00:00",
+  "pps_per_attacker": 600,
+  "duration_s": 8,
+  "mitigation_enabled": true,
+  "config": {
+    "detector": "threshold",
+    "detectors": {
+      "ewma": {
+        "alpha": 0.2,
+        "k_sigma": 4.0,
+        "sigma_floor_pps": 2.0,
+        "min_rate_pps": 20.0,
+        "warmup_windows": 3,
+        "min_sources": 1
+      },
+      "cusum": {
+        "alpha": 0.2,
+        "drift_k": 0.5,
+        "threshold_h": 6.0,
+        "z_clip": 4.0,
+        "sigma_floor_pps": 2.0,
+        "min_rate_pps": 20.0,
+        "warmup_windows": 3,
+        "min_sources": 1
+      },
+      "entropy": {
+        "alpha": 0.2,
+        "kl_threshold_bits": 0.5,
+        "share_delta": 0.1,
+        "min_victim_pps": 50.0,
+        "smoothing_pps": 0.5,
+        "warmup_windows": 3,
+        "min_sources": 1
+      }
+    },
+    "mitigation": {
+      "action": "rate_limit",
+      "rate_limit_pps": 20,
+      "rate_limit_burst_packets": 20,
+      "graduated_drop_after": 2,
+      "backoff": {
+        "enabled": false,
+        "factor": 2.0,
+        "max_timeout_s": 80,
+        "memory_s": 120
+      }
+    },
+    "poll_interval_s": 1.0,
+    "victim_pps": 100.0,
+    "source_pps": 30.0,
+    "min_sources": 2,
+    "consecutive_windows": 2,
+    "protected_sources": [
+      "10.0.0.11"
+    ],
+    "mitigation_hard_timeout_s": 10
+  },
+  "config_digest": "4ab146bc5a218f2873ca78ed9d2c9b5e1e2947a0a21528fadcf28c0c2d8f3f16",
+  "config_source": "config/detector.json",
+  "bottleneck": {
+    "device": "s1-eth1",
+    "mbit": 0.5,
+    "queue_packets": 50,
+    "qdisc": "fifo"
+  },
+  "probe_format": "binary",
+  "execution_status": "completed",
+  "validation": {
+    "status": "passed",
+    "checks": {
+      "bottleneck_qdisc": {
+        "status": "passed",
+        "problems": [],
+        "kinds": [
+          "htb",
+          "netem"
+        ]
+      },
+      "baseline_connectivity": {
+        "status": "passed",
+        "ping_loss_percent": 0.0
+      },
+      "prime_client": {
+        "status": "passed",
+        "measurement": {
+          "sent": 3,
+          "received": 3,
+          "loss_percent": 0.0,
+          "process_exit": 0
+        }
+      },
+      "prime_a1": {
+        "status": "passed",
+        "measurement": {
+          "sent": 3,
+          "received": 3,
+          "loss_percent": 0.0,
+          "process_exit": 0
+        }
+      },
+      "prime_a2": {
+        "status": "passed",
+        "measurement": {
+          "sent": 3,
+          "received": 3,
+          "loss_percent": 0.0,
+          "process_exit": 0
+        }
+      },
+      "recovery_probe": {
+        "status": "passed",
+        "measurement": {
+          "sent": 10,
+          "received": 10,
+          "loss_percent": 0.0,
+          "process_exit": 0
+        }
+      },
+      "bottleneck_qdisc_after": {
+        "status": "passed",
+        "problems": [],
+        "root": {
+          "kind": "htb",
+          "handle": "5:",
+          "parent": "root",
+          "packets": 1217,
+          "bytes": 198534,
+          "drops": 1791,
+          "overlimits": 864,
+          "requeues": 0,
+          "backlog_bytes": 0,
+          "qlen": 0
+        }
+      }
+    }
+  },
+  "measurements": {
+    "prime_client": {
+      "sent": 3,
+      "received": 3,
+      "loss_percent": 0.0,
+      "process_exit": 0
+    },
+    "prime_a1": {
+      "sent": 3,
+      "received": 3,
+      "loss_percent": 0.0,
+      "process_exit": 0
+    },
+    "prime_a2": {
+      "sent": 3,
+      "received": 3,
+      "loss_percent": 0.0,
+      "process_exit": 0
+    },
+    "client": {
+      "sent": 80,
+      "received": 64,
+      "loss_percent": 20.0,
+      "process_exit": 1
+    },
+    "recovery_client": {
+      "sent": 10,
+      "received": 10,
+      "loss_percent": 0.0,
+      "process_exit": 0
+    }
+  },
+  "probe_mode": "stream",
+  "ping_loss_percent": 0.0,
+  "phase_start_monotonic_s": 1479.113662666,
+  "phase_start_utc": "2026-10-22T06:41:36.322445+00:00",
+  "attack_end_monotonic_s": 1487.212522989,
+  "attack_end_utc": "2026-10-22T06:41:44.421305+00:00",
+  "recovery_probe_exit": 0,
+  "qdisc_monitor": {
+    "file": "qdisc.jsonl",
+    "dev": "s1-eth1",
+    "interval_s": 0.5,
+    "samples": 42,
+    "errors": 0
+  },
+  "finished_utc": "2026-10-22T06:41:57.457201+00:00",
+  "finished_monotonic_s": 1500.248443348,
+  "status": "completed"
+}
