@@ -3,14 +3,17 @@
   const $ = id => document.getElementById(id);
   const $$ = selector => [...document.querySelectorAll(selector)];
   const sources = ['10.0.0.21', '10.0.0.22', '10.0.0.11'];
-  const names = {'10.0.0.21':'Source A','10.0.0.22':'Source B','10.0.0.11':'Protected client'};
+  const CLIENT='10.0.0.11',A3='10.0.0.23';
+  const names = {'10.0.0.21':'Source A','10.0.0.22':'Source B','10.0.0.23':'Source C','10.0.0.11':'Protected client'};
+  const detectorInfo = {threshold:['Two-window threshold','TwoWindowDetector','Fixed thresholds'],ewma:['EWMA control chart','EwmaDetector','Learned per-source baseline'],cusum:['CUSUM change detector','CusumDetector','Accumulated excess rate'],entropy:['Traffic-mix divergence','EntropyDetector','Change in who sends traffic']};
+  const actionCaptions = {drop:'Drop the offender’s traffic',rate_limit:'Police each offender with a token bucket',graduated:'Rate-limit first, drop repeat offenders'};
   const fmt = (value, digits=0) => Number(value || 0).toLocaleString('en-US', {maximumFractionDigits:digits});
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const state = {page:'lab',mode:'simulation',scenario:'sustained',mitigation:true,compare:true,clock:0,max:30,playing:false,speed:1,pps:600,capacity:1000,runs:null,recorded:null,bootstrap:null,lastTick:-1,lastJournal:'',selectedPacket:null,packets:[],requestId:0,chartData:[],reduced:matchMedia('(prefers-reduced-motion: reduce)').matches};
-  const eventNames = {attack_started:'TRAFFIC INCREASE',attack_ended:'SOURCES QUIET',alert:'SUSTAINED FLOOD DETECTED',drop_requested:'DROP RULE REQUESTED',drop_confirmed:'DROP RULES CONFIRMED',rule_expired:'RULE EXPIRED',drop_removed:'RULE REMOVED',switch_connected:'SWITCH CONNECTED',start:'GENERATOR STARTED',stop:'GENERATOR STOPPED'};
+  const state = {page:'lab',mode:'simulation',scenario:'sustained',mitigation:true,compare:true,clock:0,max:30,playing:false,speed:1,pps:600,capacity:1000,runs:null,recorded:null,bootstrap:null,lastTick:-1,lastJournal:'',selectedPacket:null,packets:[],requestId:0,chartData:[],detector:'threshold',action:'drop',backoff:false,rateLimit:20,queueOn:false,queueSize:50,benchmark:null,reduced:matchMedia('(prefers-reduced-motion: reduce)').matches};
+  const eventNames = {ratelimit_requested:'RATE LIMIT REQUESTED',ratelimit_confirmed:'MODELED RATE LIMIT APPLIED',attack_started:'TRAFFIC INCREASE',attack_ended:'SOURCES QUIET',alert:'SUSTAINED FLOOD DETECTED',drop_requested:'DROP RULE REQUESTED',drop_confirmed:'DROP RULES CONFIRMED',rule_expired:'RULE EXPIRED',drop_removed:'RULE REMOVED',switch_connected:'SWITCH CONNECTED',start:'GENERATOR STARTED',stop:'GENERATOR STOPPED'};
   const explain = {
     client:['A request worth protecting.','The normal client sends a small UDP message and expects an identical reply. Its fixed MAC, IPv4 address, and ingress port are bound together. Its address is excluded from the lab’s offender set.'],
-    sources:['Many senders. One destination.','Source A and B offer traffic to the echo service. Source C is part of the original five-host topology and remains in reserve in these scenes. In the Internet case, visible source addresses may be reflectors—not the attack initiator.'],
+    sources:['Many senders. One destination.','Source A and B offer traffic to the echo service. Source C is part of the original five-host topology; it stays in reserve except in the three-source flood and the flash crowd. In the Internet case, visible source addresses may be reflectors—not the attack initiator.'],
     controller:['The control plane.','The Python controller polls switch counters once per second, computes rates, and checks the two-window rule. It tells the switch which precise flows to drop. It does not inspect every packet in an established forwarding flow.'],
     switch:['The data plane.','Open vSwitch forwards matching packets in the original lab. Priority-200 drop rules override priority-100 service forwarding rules. The dashboard models these decisions; only the recorded mode contains evidence from a real switch run.'],
     server:['An echo, not a web page.','This service receives a UDP payload on port 9000 and returns it unchanged. Successful replies and their round-trip times make connectivity easy to observe. Server pressure in model mode depends on an explicit assumed capacity.']
@@ -40,6 +43,7 @@
     if(location.hash!==`#${page}`) history.replaceState(null,'',`#${page}`);
     window.scrollTo({top:0,behavior:'instant'});
     if(page==='lab') drawChart();
+    if(page==='learn') loadBenchmark();
   }
   function setPlaying(playing) {
     state.playing=playing;
@@ -71,7 +75,7 @@
   }
   async function loadSimulation(reset=false) {
     const request=++state.requestId;
-    const query=new URLSearchParams({scenario:state.scenario,pps:state.pps,capacity:state.capacity});
+    const query=new URLSearchParams({scenario:state.scenario,pps:state.pps,capacity:state.capacity,detector:state.detector,action:state.action,backoff:state.backoff?1:0,rate_limit:state.rateLimit,queue:state.queueOn?state.queueSize:0});
     $('play').disabled=true;
     $('replay-workspace').setAttribute('aria-busy','true');
     try {
@@ -84,7 +88,7 @@
       $('play').disabled=false;state.lastJournal='';state.selectedPacket=null;
       $('replay-workspace').dataset.loadedScenario=state.scenario;
       $('replay-workspace').setAttribute('aria-busy','false');
-      render(true);drawChart();
+      updateTopology();updatePolicyNote();render(true);drawChart();
     } catch(error){toast(error.message);$('play').disabled=false;$('replay-workspace').setAttribute('aria-busy','false');}
   }
   async function setMode(mode) {
@@ -93,6 +97,8 @@
     $('replay-workspace').hidden=mode==='live';$('live-workspace').hidden=mode!=='live';
     $('scenario').disabled=mode==='recorded';$('settings-toggle').hidden=mode==='recorded';$('settings').hidden=true;
     $('settings-toggle').setAttribute('aria-expanded','false');
+    $('model-metrics').hidden=mode!=='simulation';$('rule-pills').hidden=mode!=='simulation';
+    if(mode!=='simulation'){updateTopology(true);restorePolicyNote();}
     if(mode==='live'){
       $('provenance').textContent='Real application messages on localhost. No switch, no flood, no simulated RTTs.';
       return;
@@ -128,18 +134,44 @@
       if(frame.active_rules.length)return ['04','THE TRAFFIC PHASE HAS ENDED','The sources stop. The rules linger briefly.','The original traffic phase lasts eight seconds. Existing drop rules remain until their hard timeout expires.'];
       return ['05','RECORDED RECOVERY','Temporary rules are gone.','Both original runs delivered 80/80 legitimate replies. These data demonstrate filtering; they do not establish an availability improvement under saturation.'];
     }
+    const summary=currentRun().summary||{},alerted=(summary.alert_count||0)>0,firstAlert=summary.first_alert_s;
+    const rules=frame.active_rules||[],limited=rules.some(rule=>rule.action==='rate_limit'),det=detectorInfo[state.detector]||detectorInfo.threshold;
+    const plainDrop=state.detector==='threshold'&&!limited;
     if(t<5)return ['01','ESTABLISH THE BASELINE','First, everything works.','The client sends small requests. The echo server sends them back. The controller counts quietly.'];
     if(state.scenario==='normal')return ['01','AN ORDINARY DAY','Small requests. Small replies.','Traffic remains below the detection thresholds. A normal client should not need a mitigation rule.'];
-    if(state.scenario==='single-source' && t<26)return ['02','A DELIBERATE LIMITATION','One noisy source is not two.','The configured detector requires at least two qualifying source IPs. This single-source flood is deliberately left undetected.'];
-    if(state.scenario==='low-rate' && t<26)return ['02','ANOTHER DELIBERATE LIMITATION','Under the threshold. Under the radar.','Each source sends 40 packets/s. Combined with the client, the victim rate is 90 packets/s—below the configured >100 threshold.'];
+    const special=scenarioChapter(frame,t,{alerted,firstAlert,rules,limited,det});
+    if(special)return special;
+    if(state.scenario==='single-source' && t<26 && !alerted)return ['02','A DELIBERATE LIMITATION','One noisy source is not two.','The configured detector requires at least two qualifying source IPs. This single-source flood is deliberately left undetected.'];
+    if(state.scenario==='low-rate' && t<26 && !alerted)return ['02','ANOTHER DELIBERATE LIMITATION','Under the threshold. Under the radar.','Each source sends 40 packets/s. Combined with the client, the victim rate is 90 packets/s—below the configured >100 threshold.'];
     if(state.scenario==='burst' && t<7)return ['02','BURST TOLERANCE','A spike is not yet a sustained flood.','Only one observation is high. The detector needs two consecutive high windows, so this brief burst does not trigger an alert.'];
-    if(frame.active_rules.length && frame.drop_pps===0 && t<8)return ['03','TWO WINDOWS. ONE DECISION.','Enough evidence to act.','Two sources exceeded 30 packets/s while the victim exceeded 100. The modeled drop rules now apply to the next forwarding interval.'];
+    if(frame.active_rules.length && frame.drop_pps===0 && t<8)return plainDrop?['03','TWO WINDOWS. ONE DECISION.','Enough evidence to act.','Two sources exceeded 30 packets/s while the victim exceeded 100. The modeled drop rules now apply to the next forwarding interval.']:['03',state.detector==='threshold'?'TWO WINDOWS. ONE DECISION.':'ONE DETECTOR. ONE DECISION.','Enough evidence to act.',`The ${det[1]} named the offenders. Modeled ${limited?'rate-limit':'drop'} rules now apply to the next forwarding interval.`];
+    if(frame.active_rules.length&&limited)return ['04','POLICE AT THE SWITCH','Slow the offenders. Keep the client.','The model passes each offender through a token bucket: a short burst, then the configured rate. The protected client is not limited. While a rule is installed the offender reads as 0 packets/s to the detector, as in the real controller.'];
     if(frame.active_rules.length)return ['04','ENFORCE AT THE SWITCH','Stop the offenders. Keep the client.','The model filters only those sources’ UDP traffic to port 9000. The protected client’s packets remain allowed. Rule expiry is visible in the journal.'];
-    if(frame.high_windows===1)return ['02','FIRST QUALIFYING OBSERVATION','Suspicious. But wait one window.','The rate and source-count thresholds are met. Waiting for persistence avoids treating every short spike as a sustained attack.'];
+    if(frame.high_windows===1&&state.detector!=='cusum')return ['02','FIRST QUALIFYING OBSERVATION','Suspicious. But wait one window.','The rate and source-count thresholds are met. Waiting for persistence avoids treating every short spike as a sustained attack.'];
     if(t>=26 || (state.scenario==='burst' && t>=7))return ['06','RECOVERY & REARMING','A quiet network can recover.','A non-high observation resets detection. Temporary rules expire automatically; a later wave can trigger a new decision.'];
     if(t>=17 && t<20 && state.mitigation)return ['05','THE HARD TIMEOUT','Ten seconds later, the rule expires.','Expiry avoids an indefinite block. If sources keep flooding, counters rise again and the detector can install another temporary rule.'];
     if(frame.detector_alert||(!state.mitigation && t>=7))return ['03','DETECTING IS NOT BLOCKING','An alarm alone does not stop a flood.','The detector can raise an alert, but with mitigation OFF the switch continues forwarding traffic. Compare the two traces below.'];
     return ['02','TRAFFIC CHANGES','Two sources start talking at once.','The same offered traffic is used in both counterfactual runs. Toggle mitigation to compare enforcement at the same replay moment.'];
+  }
+  function attackOffered(frame) {return Object.entries(frame.source_offered_pps||{}).filter(([ip])=>ip!==CLIENT).reduce((sum,[,rate])=>sum+(rate||0),0);}
+  function scenarioChapter(frame,t,{alerted,firstAlert,rules,limited,det}) {
+    const scenario=state.scenario,beforeAlert=!alerted||t<firstAlert;
+    if(scenario==='flash-crowd'){
+      if(rules.length)return ['04','A FALSE ALARM','The rule hits busy, legitimate hosts.',`The ${det[1]} read the crowd as a flood, so the model now ${limited?'polices':'blocks'} hosts that were only busy. A volume rule cannot tell popularity from an attack; the traffic-mix detector sees the same mix and stays quiet.`];
+      if(t<26)return ['02','A FLASH CROWD','More traffic is not always an attack.',`Every host, including the protected client, scales smoothly to 20× its usual rate with the same mix. ${alerted?'Watch whether this detector mistakes it for a flood.':'This detector does not alert: the mix of senders has not changed.'}`];
+      return ['06','THE CROWD THINS','Traffic returns to normal.',alerted?'Rules installed during the crowd expire on their own timeout. Each one blocked legitimate traffic: the price of a false positive.':'No alert and no rule: legitimate load was left alone.'];
+    }
+    if(scenario==='pulsing'&&t<26&&!rules.length){
+      if(!alerted)return ['02','ON, OFF, ON, OFF','A flood that never stays for two windows.','Both sources send 600 packets/s every other second, so no two consecutive windows are high and a persistence rule never fires. Try the CUSUM detector: its running sum carries evidence across the quiet seconds.'];
+      if(t<firstAlert)return ['02','EVIDENCE ACCUMULATES','Short pulses add up.','Each pulse adds standardised excess rate to a running sum and a quiet second removes only a little. A few pulses push the sum past its alarm level, although no two consecutive windows are high.'];
+    }
+    if(scenario==='ramp'&&t<26&&!rules.length&&beforeAlert)return ['02','LOW AND SLOW','The flood creeps up.','Each source rises from 5 to 150 packets/s over 20 seconds. A fixed threshold trips once the rates cross it; a baseline that keeps learning can absorb a slow rise as “normal”.'];
+    if(scenario==='three-source'&&t<26&&!rules.length&&beforeAlert)return ['02','THREE SOURCES','A third host joins the flood.','Source C (10.0.0.23) adds its own traffic. Every qualifying source is named in the alert and receives its own rule.'];
+    if(scenario==='repeat-offender'){
+      if(rules.length){const rule=rules.reduce((a,b)=>b.offense_count>a.offense_count?b:a);return ['04','REPEAT OFFENDER',`Offense ${rule.offense_count}: a ${rule.ttl_s}-second rule.`,state.backoff?'Back-off doubles the rule lifetime for each repeat offense the controller still remembers, so a later wave can meet a rule that is still installed.':'Without back-off every offense gets the same 10-second rule, so each new wave reaches the server until it is detected again. Turn on back-off and replay.'];}
+      if(t>10&&attackOffered(frame)<100)return ['05','BETWEEN WAVES','The sources go quiet, then return.','The controller remembers each offender for 120 seconds after its rule ends. That memory is what lets back-off give a repeat offense a longer rule.'];
+    }
+    return null;
   }
   function render(force=false) {
     if(state.mode==='live'||!state.runs||(state.mode==='recorded'&&!state.recorded))return;
@@ -153,17 +185,19 @@
     ['chapter-number','chapter-kicker','chapter-title','chapter-copy'].forEach((id,index)=>$(id).textContent=story[index]);
     $('moment-detail').textContent=momentDetail(frame);
     for(const [ip,id] of [['10.0.0.21','rate-a1'],['10.0.0.22','rate-a2'],['10.0.0.11','rate-client']]) $(id).textContent=`${fmt(frame.source_offered_pps[ip],0)} packets/s${recorded?'*':''}`;
+    $('rate-a3').textContent=!recorded&&A3 in frame.source_offered_pps?`${fmt(frame.source_offered_pps[A3])} packets/s`:'';
     const rules=frame.active_rules||[];
     $('drop-marker').setAttribute('visibility',rules.length?'visible':'hidden');
+    $('drop-marker').querySelector('text').textContent=rules.length&&rules.every(rule=>rule.action==='rate_limit')?'Policed here':'Blocked here';
     $('metric-delivered').textContent=fmt(frame.victim_delivered_pps);
     $('metric-dropped').textContent=recorded&&frame.drop_rate_available===false?'—':fmt(frame.drop_pps);
-    $('metric-rules').textContent=rules.length?`${rules.length} ${recorded?'recorded':'modeled'} rules · ${Math.max(0,Math.ceil(Math.min(...rules.map(r=>r.expires_at_s))-state.clock))}s until expiry`:'No active drop rules';
+    $('metric-rules').textContent=rules.length?`${rules.length} ${recorded?'recorded':'modeled'} rules · ${Math.max(0,Math.ceil(Math.min(...rules.map(r=>r.expires_at_s))-state.clock))}s until expiry`:recorded||state.action==='drop'?'No active drop rules':'No active rules';
     if(recorded&&frame.drop_rate_available===false)$('metric-rules').textContent='First drop sample establishes a baseline';
     $('server-node').classList.toggle('overloaded',!recorded&&frame.server_load_ratio>1);
     $('server-state').textContent=recorded?'RECORDED OBSERVATION':frame.server_load_ratio>1?'MODELED OVERLOAD':rules.length?'PROTECTED':'HEALTHY';
     $('mobile-server-state').textContent=$('server-state').textContent;
     $('mobile-client-rate').textContent=`${fmt(frame.source_offered_pps['10.0.0.11'])} packets/s`;
-    $('mobile-attack-rate').textContent=`${fmt((frame.source_offered_pps['10.0.0.21']||0)+(frame.source_offered_pps['10.0.0.22']||0))} packets/s offered`;
+    $('mobile-attack-rate').textContent=`${fmt((frame.source_offered_pps['10.0.0.21']||0)+(frame.source_offered_pps['10.0.0.22']||0)+(frame.source_offered_pps[A3]||0))} packets/s offered`;
     if(recorded){
       const measured=currentRun().summary.client;
       $('metric-load').textContent='Counter-derived rate · capacity unmeasured';
@@ -175,17 +209,47 @@
       $('metric-load').textContent=`${fmt(frame.server_load_ratio*100)}% of assumed capacity`;
       $('metric-client').textContent=fmt(frame.client_success*100);
       $('metric-client').nextElementSibling.textContent='%';
-      $('metric-latency').textContent=`Illustrative latency: ${fmt(frame.client_latency_ms,1)} ms`;
+      $('metric-latency').textContent=frame.queue_delay_ms==null?`Illustrative latency: ${fmt(frame.client_latency_ms,1)} ms`:`Modeled latency: ${fmt(frame.client_latency_ms,1)} ms (2 ms + queue)`;
       $('controller-state').textContent=rules.length?'Source-specific rules active.':frame.high_windows?'Checking sustained traffic.':'Watching, not blocking.';
+      renderModelMetrics(frame,rules);
     }
-    const windows=recorded?0:Math.min(frame.high_windows||0,2);
+    let windows=recorded?0:Math.min(frame.high_windows||0,2),windowLabel=recorded?'Original observations':`${windows} / 2 high windows`;
+    const cusum=!recorded&&frame.detector_state&&frame.detector_state.cusum;
+    if(cusum){const maxS=Math.max(0,...Object.values(cusum)),h=frame.detector_state.threshold_h;windows=maxS>h?2:maxS>h/2?1:0;windowLabel=`CUSUM ${fmt(maxS,1)} / alarm ${fmt(h,1)}`;}
+    else if(!recorded){const need=currentRun().thresholds?.consecutive_windows||2;if(need!==2)windowLabel=`${Math.min(frame.high_windows||0,need)} / ${need} high windows`;}
     $$('#window-dots > circle').forEach((el,i)=>el.classList.toggle('filled',i<windows));
-    $('window-dots').querySelector('text').textContent=recorded?'Original observations':`${windows} / 2 high windows`;
+    $('window-dots').querySelector('text').textContent=windowLabel;
     renderJournal();renderPackets();updateChartCursor();
+  }
+  function detectorScore(frame) {
+    const s=frame.detector_state||{},run=currentRun();
+    if(s.cusum)return {value:Math.max(0,...Object.values(s.cusum)),digits:1,label:'CUSUM SUM (MAX)',note:`Largest running sum · alarm above ${fmt(s.threshold_h,1)}`};
+    if(s.kl_bits!==undefined)return {value:s.kl_bits,digits:2,label:'MIX DIVERGENCE',note:`KL divergence in bits · alarm above ${fmt(s.kl_threshold_bits,2)}`};
+    if(s.scores&&s.k_sigma!==undefined){const values=Object.entries(s.scores).filter(([ip])=>ip!==CLIENT).map(([,v])=>v);return {value:Math.max(0,...values),digits:1,label:'EWMA Z-SCORE (MAX)',note:`Largest source z-score · alarm above ${fmt(s.k_sigma,1)} σ`};}
+    const limit=run.thresholds?.victim_pps||100;
+    return {value:(frame.detector_input?.victim_pps||0)/limit,digits:2,label:'VICTIM RATE ÷ THRESHOLD',note:`Fixed rule: alarm above 1.00 (${fmt(limit)} packets/s); no learned score`};
+  }
+  function renderModelMetrics(frame,rules) {
+    const queueOn=frame.queue_depth_packets!=null;
+    $('model-metrics').classList.toggle('queue-off',!queueOn);
+    $('metric-queue').textContent=queueOn?fmt(frame.queue_depth_packets,0):'—';
+    $('metric-queue-note').textContent=queueOn?`of ${fmt(currentRun().parameters.queue_packets)} · modeled delay ${fmt(frame.queue_delay_ms,1)} ms`:'Queue model off · turn on “Bottleneck queue”';
+    $('metric-queue-drops').textContent=queueOn?fmt(frame.queue_drops_pps,0):'—';
+    $('metric-queue-drops-note').textContent=queueOn?`Arrivals beyond ${fmt(state.capacity)} packets/s and a full queue`:'Proportional-share formula in use';
+    const score=detectorScore(frame);
+    $('score-label').textContent=score.label;$('metric-score').textContent=fmt(score.value,score.digits);$('metric-score-note').textContent=score.note;
+    $('rule-pills').innerHTML=rules.map(rule=>{
+      const left=Math.max(0,Math.ceil(rule.expires_at_s-state.clock));
+      const verb=rule.action==='rate_limit'?`rate-limited ${fmt(rule.rate_pps)} pps`:'dropped';
+      return `<span class="rule-pill${rule.action==='rate_limit'?' limit':''}">${esc(rule.source)} · ${esc(verb)} · TTL ${fmt(rule.ttl_s)} s · ${left} s left${rule.offense_count>1?` · offense ${fmt(rule.offense_count)}`:''}</span>`;
+    }).join('');
   }
   function momentDetail(frame) {
     if(state.mode==='recorded')return 'The recorded mode shows the unmodified original experiment. Source offered rates marked * are inferred from delivered flow rates plus recorded drop deltas. The victim chart uses separate victim.jsonl receive counts. Packet-desk probe rows preserve original timestamps and RTTs; they are not raw frame captures. Historical results predate the new controller hardening.';
     const input=frame.detector_input||{};
+    const queueText=frame.queue_delay_ms==null?'':` A modeled ${fmt(currentRun().parameters.queue_packets)}-packet FIFO queue serves ${fmt(state.capacity)} packets/s; client success is the share of arrivals it does not drop.`;
+    if(state.detector!=='threshold'){const score=detectorScore(frame);return `The actual ${detectorInfo[state.detector][1]} (controller/detectors.py) sees ${fmt(input.victim_pps)} packets/s for the protected service. ${score.note}: now ${fmt(score.value,score.digits)}. Sources under a modeled rule read as 0 packets/s to the detector, as in the real controller. Forwarding is modeled; no OpenFlow switch is contacted.${queueText} Motion and packet rows are representative, not a measured packet capture.`;}
+    if(queueText)return `The actual detector sees ${fmt(input.victim_pps)} packets/s for the protected service. ${frame.high_windows||0} consecutive high observations have occurred. Forwarding is modeled; no OpenFlow switch is contacted.${queueText} Motion and packet rows are representative, not a measured packet capture.`;
     return `The actual detector sees ${fmt(input.victim_pps)} packets/s for the protected service. ${Object.entries(input.source_pps||{}).filter(([ip,rate])=>ip!=='10.0.0.11'&&rate>30).length} unprotected sources exceed 30 packets/s; ${frame.high_windows||0} consecutive high observations have occurred. Forwarding is modeled; no OpenFlow switch is contacted. Reply success assumes proportional sharing of an explicitly hypothetical ${fmt(state.capacity)} packets/s service capacity. Motion and packet rows are representative, not a measured packet capture.`;
   }
   function eventMessage(event) {
@@ -258,13 +322,13 @@
       });
       off=midpoints('attack_off');on=midpoints('attack_on');
     }else{
-      const points=run=>run.frames.map(frame=>({x:frame.t_s,y:sources.filter(ip=>ip!=='10.0.0.11').reduce((sum,ip)=>sum+(frame.source_delivered_pps[ip]||0),0)}));
+      const points=run=>run.frames.map(frame=>({x:frame.t_s,y:Object.entries(frame.source_delivered_pps).filter(([ip])=>ip!==CLIENT).reduce((sum,[,rate])=>sum+(rate||0),0)}));
       off=points(state.runs.off);on=points(state.runs.on);
     }
     state.chartData=[off,on];
     const width=Math.max(280,holder.getBoundingClientRect().width),height=holder.getBoundingClientRect().height||190;
     const m={top:16,right:16,bottom:32,left:47};
-    const maxX=recorded?8:30;
+    const maxX=recorded?8:state.max;
     const x=d3.scaleLinear().domain([0,maxX]).range([m.left,width-m.right]);
     const maxY=Math.max(100,d3.max([...off,...on],d=>d.y)||100)*1.15;
     const y=d3.scaleLinear().domain([0,maxY]).nice().range([height-m.bottom,m.top]);
@@ -272,7 +336,7 @@
     holder.replaceChildren();
     const svg=d3.select(holder).append('svg').attr('viewBox',`0 0 ${width} ${height}`).attr('role','img').attr('aria-label',recorded?'Measured attacker packet receive rates from the two original trials':'Modeled attacker packet receive rates for the same offered traffic');
     y.ticks(3).forEach(tick=>{svg.append('line').attr('x1',m.left).attr('x2',width-m.right).attr('y1',y(tick)).attr('y2',y(tick)).attr('stroke','#d7cfc3').attr('stroke-width',.7);svg.append('text').attr('class','chart-label').attr('x',m.left-9).attr('y',y(tick)+3).attr('text-anchor','end').text(fmt(tick));});
-    const ticks=width<500?[0,maxX/2,maxX]:recorded?[0,2,4,6,8]:[0,5,10,15,20,25,30];
+    const ticks=width<500?[0,maxX/2,maxX]:recorded?[0,2,4,6,8]:d3.range(0,maxX+.001,maxX>30?10:5);
     ticks.forEach(tick=>svg.append('text').attr('class','chart-label').attr('x',x(tick)).attr('y',height-15).attr('text-anchor',tick===maxX?'end':tick===0?'start':'middle').text(`${tick}s`));
     svg.append('text').attr('class','chart-label').attr('x',m.left).attr('y',9).text('ATTACKER PACKETS / SECOND');
     const line=d3.line().x(d=>x(d.x)).y(d=>y(d.y)).curve(recorded?d3.curveLinear:d3.curveStepAfter);
@@ -307,7 +371,7 @@
     $('chart-cursor').setAttribute('x1',scales.x(time));$('chart-cursor').setAttribute('x2',scales.x(time));
     $('chart-cursor-dot').setAttribute('cx',scales.x(time));$('chart-cursor-dot').setAttribute('cy',scales.y(point.y));
   }
-  const pathDefs=[['client','10.0.0.11','#557652'],['a1','10.0.0.21','#c35332'],['a2','10.0.0.22','#c35332']];
+  const pathDefs=[['client','10.0.0.11','#557652'],['a1','10.0.0.21','#c35332'],['a2','10.0.0.22','#c35332'],['a3',A3,'#c35332']];
   const particlePool=[];
   let lastParticleKey='';
   let particleGroup=null;
@@ -329,10 +393,11 @@
     for(const [pathId,source,color] of pathDefs){
       const offered=frame.source_offered_pps[source]||0;
       const count=offered?Math.min(20,Math.max(2,Math.round(Math.log2(offered+1)*1.6))):0;
-      const path=$(`${prefix}path-${pathId}`);
+      const path=$(`${prefix}path-${pathId}`)||(pathId==='a3'?$(`${prefix}path-a2`):null);
+      if(!path)continue;
       for(let i=0;i<count;i++)positionParticle(index++,path,(motion*.35+i/count)%1,color,source==='10.0.0.11'?2.7:2.3,.85);
     }
-    const deliveredAttack=(frame.source_delivered_pps['10.0.0.21']||0)+(frame.source_delivered_pps['10.0.0.22']||0);
+    const deliveredAttack=(frame.source_delivered_pps['10.0.0.21']||0)+(frame.source_delivered_pps['10.0.0.22']||0)+(frame.source_delivered_pps[A3]||0);
     const serverPath=$(prefix+'path-server');
     if(frame.victim_delivered_pps>0){
       const count=Math.min(22,Math.max(3,Math.round(Math.log2(frame.victim_delivered_pps+1)*1.6)));
@@ -341,8 +406,58 @@
     if(state.clock>0){const control=$(prefix+'path-control');for(let i=0;i<2;i++)positionParticle(index++,control,(motion*.65+i*.5)%1,'#573d55',2,.65);}
     for(let i=index;i<particlePool.length;i++)particlePool[i].setAttribute('display','none');
   }
+  function updateTopology(reset=false) {
+    const active=!reset&&state.mode==='simulation'&&!!state.runs&&A3 in (state.runs.on.frames[0]?.source_offered_pps||{});
+    const host=$('host-a3');
+    host.classList.toggle('dormant-host',!active);host.classList.toggle('attacker-host',active);
+    $('path-a3').classList.toggle('dormant-wire',!active);$('path-a3').classList.toggle('attack-wire',active);
+    $('name-a3').textContent=active?'Traffic source C':'Source C · reserve';
+    host.setAttribute('aria-label',active?'Explain traffic source three':'Explain the reserve source');
+    if(!active)$('rate-a3').textContent='';
+    $('mobile-sources-name').textContent=active?'Sources A + B + C':'Sources A + B';
+    $('mobile-sources-address').textContent=active?'.21 / .22 / .23':'.21 / .22 · C in reserve';
+  }
+  let originalPolicyNote=null;
+  function restorePolicyNote() {if(originalPolicyNote!==null)document.querySelector('.policy-note').innerHTML=originalPolicyNote;}
+  function updatePolicyNote() {
+    const note=document.querySelector('.policy-note');if(originalPolicyNote===null)originalPolicyNote=note.innerHTML;
+    const run=state.runs?.on;if(!run)return;
+    const params=run.parameters,p=run.detector_parameters||{},th=run.thresholds;
+    if(params.detector==='threshold'&&params.action==='drop'&&!params.backoff){restorePolicyNote();return;}
+    const rule={
+      threshold:`<strong>&gt;${fmt(th.victim_pps)}</strong> victim packets/s + <strong>${fmt(th.min_sources)} sources</strong> above ${fmt(th.source_pps)} packets/s, for <strong>${fmt(th.consecutive_windows)} consecutive windows.</strong>`,
+      ewma:`A source above its learned mean + <strong>${fmt(p.k_sigma,1)}σ</strong> (and over ${fmt(p.min_rate_pps)} packets/s) while the victim total is also anomalous, for <strong>${fmt(th.consecutive_windows)} consecutive windows.</strong>`,
+      cusum:`A source’s running sum of standardised excess rate exceeds <strong>h = ${fmt(p.threshold_h,1)}</strong> (drift ${fmt(p.drift_k,1)}). Pulses accumulate across quiet seconds.`,
+      entropy:`Traffic-mix divergence above <strong>${fmt(p.kl_threshold_bits,2)} bits</strong> with a victim surge; offenders’ shares rose by over ${fmt(p.share_delta*100)}%, for <strong>${fmt(th.consecutive_windows)} windows.</strong>`
+    }[params.detector];
+    const action=params.action==='drop'?'DROP':params.action==='rate_limit'?`RATE-LIMIT ${fmt(params.rate_limit_pps)} PPS`:`RATE-LIMIT ${fmt(params.rate_limit_pps)} PPS, THEN DROP`;
+    note.innerHTML=`<span class="eyebrow">THE DETECTION RULE · ${esc(detectorInfo[params.detector][1].toUpperCase())}</span><p>${rule}</p><span class="mono">ACTION: ${action} · SOURCE → VICTIM UDP :9000<br>LIFETIME: ${fmt(th.mitigation_hard_timeout_s)} SECONDS${params.backoff?', DOUBLING FOR REPEAT OFFENSES':''}</span>`;
+  }
+  async function loadBenchmark() {
+    if(state.benchmark)return;
+    try{
+      const data=await api('/api/benchmark');state.benchmark=data;
+      const bench=data.benchmark,detectors=bench.detectors,results=bench.results;
+      const order=(state.bootstrap?.scenarios||[]).map(item=>item.id).filter(id=>id in results[detectors[0]]);
+      for(const id of Object.keys(results[detectors[0]]))if(!order.includes(id))order.push(id);
+      $('benchmark-head').innerHTML=`<tr><th scope="col">Scenario</th>${detectors.map(name=>`<th scope="col">${esc(detectorInfo[name]?.[0]||name)}</th>`).join('')}</tr>`;
+      $('benchmark-rows').innerHTML=order.map(id=>{
+        const benign=results[detectors[0]][id].benign;
+        const cells=detectors.map(name=>{
+          const row=results[name][id];
+          if(benign)return `<td class="${row.false_positive_runs?'bad':'good'}">FP ${fmt(row.false_positive_runs)}/${fmt(row.runs)}</td>`;
+          const rate=row.detection_rate||0,latency=row.median_latency_s;
+          return `<td class="${rate>=.9?'good':rate<.5?'bad':'mid'}">${fmt(rate*100)}%${latency==null?'':` · ${fmt(latency,1)} s`}</td>`;
+        }).join('');
+        const label=(state.bootstrap?.scenarios||[]).find(item=>item.id===id)?.label||bench.scenarios[id]?.label||id;
+        return `<tr class="${benign&&!/benign/i.test(label)?'benign-row':''}"><th scope="row">${esc(label)}</th>${cells}</tr>`;
+      }).join('');
+      const params=bench.parameters||{};
+      $('benchmark-note').textContent=`${data.provenance.label} ${fmt(params.seeds)} seeded runs per cell (seed base ${fmt(params.seed_base)}), ${fmt(params.pps_per_attacker)} packets/s per attacker, Poisson noise on every source. ${data.provenance.warning}`;
+    }catch(error){$('benchmark-rows').innerHTML=`<tr><td class="packet-empty">The offline benchmark is unavailable: ${esc(error.message)}</td></tr>`;}
+  }
   function exportTrace() {
-    const data={provenance:state.mode==='recorded'?'Original counter and probe observations, with labeled derived rate fields; not raw packet capture':'Synthetic representative model rows; not captured traffic',mode:state.mode,scenario:state.scenario,mitigation:state.mitigation,replay_time_s:state.clock,rows:state.packets,events:currentRun().events.filter(e=>e.t_s<=state.clock)};
+    const data={provenance:state.mode==='recorded'?'Original counter and probe observations, with labeled derived rate fields; not raw packet capture':'Synthetic representative model rows; not captured traffic',mode:state.mode,scenario:state.scenario,mitigation:state.mitigation,model_parameters:state.mode==='recorded'?undefined:currentRun().parameters,replay_time_s:state.clock,rows:state.packets,events:currentRun().events.filter(e=>e.t_s<=state.clock)};
     const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),anchor=document.createElement('a');
     anchor.href=url;anchor.download=`flowguard-${state.mode}-${state.mitigation?'on':'off'}-trace.json`;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Trace exported with its provenance label.');
   }
@@ -383,10 +498,15 @@
     $('compare-toggle').addEventListener('click',()=>{state.compare=!state.compare;$('compare-region').hidden=!state.compare;$('compare-toggle').setAttribute('aria-pressed',String(state.compare));if(state.compare)drawChart();});
     $('settings-toggle').addEventListener('click',()=>{const open=$('settings').hidden;$('settings').hidden=!open;$('settings-toggle').setAttribute('aria-expanded',String(open));});
     $('why-toggle').addEventListener('click',()=>{const open=$('moment-detail').hidden;$('moment-detail').hidden=!open;$('why-toggle').setAttribute('aria-expanded',String(open));});
-    for(const [id,key] of [['pps','pps'],['capacity','capacity']]){
-      $(id).addEventListener('input',()=>{$(`${id}-value`).textContent=fmt($(id).value);});
+    for(const [id,key] of [['pps','pps'],['capacity','capacity'],['rate-limit','rateLimit'],['queue-size','queueSize']]){
+      const output=id==='rate-limit'?'rate-limit-value':id==='queue-size'?'queue-value':`${id}-value`;
+      $(id).addEventListener('input',()=>{$(output).textContent=fmt($(id).value);});
       $(id).addEventListener('change',()=>{state[key]=Number($(id).value);setPlaying(false);loadSimulation(false);});
     }
+    $('detector').addEventListener('change',()=>{state.detector=$('detector').value;$('detector-caption').textContent=detectorInfo[state.detector][2];setPlaying(false);loadSimulation(false);toast(`Replaying with the ${detectorInfo[state.detector][1]}.`);});
+    $('action').addEventListener('change',()=>{state.action=$('action').value;$('action-caption').textContent=actionCaptions[state.action];$('rate-limit').disabled=state.action==='drop';setPlaying(false);loadSimulation(false);});
+    $('backoff').addEventListener('change',()=>{state.backoff=$('backoff').checked;setPlaying(false);loadSimulation(false);});
+    $('queue-toggle').addEventListener('change',()=>{state.queueOn=$('queue-toggle').checked;$('queue-size').disabled=!state.queueOn;setPlaying(false);loadSimulation(false);});
     $('play').addEventListener('click',()=>{if(state.clock>=state.max)state.clock=0;setPlaying(!state.playing);});
     $('restart').addEventListener('click',()=>{state.clock=0;setPlaying(false);state.lastJournal='';render(true);});
     $('timeline').addEventListener('input',()=>{setPlaying(false);state.clock=Number($('timeline').value);render(true);});
@@ -426,9 +546,18 @@
     if(state.playing){state.clock=Math.min(state.max,state.clock+elapsed*state.speed);if(state.clock>=state.max)setPlaying(false);render();}
     drawParticles();requestAnimationFrame(loop);
   }
+  function applyDefaults(defaults) {
+    if(defaults.detector in detectorInfo){state.detector=defaults.detector;$('detector').value=state.detector;$('detector-caption').textContent=detectorInfo[state.detector][2];}
+    if(defaults.action in actionCaptions){state.action=defaults.action;$('action').value=state.action;$('action-caption').textContent=actionCaptions[state.action];}
+    $('rate-limit').disabled=state.action==='drop';
+    state.backoff=!!defaults.backoff;$('backoff').checked=state.backoff;
+    if(Number.isFinite(defaults.rate_limit_pps)){state.rateLimit=Math.min(200,Math.max(5,defaults.rate_limit_pps));$('rate-limit').value=state.rateLimit;$('rate-limit-value').textContent=fmt(state.rateLimit);}
+    const queue=state.bootstrap.queue_defaults||{};
+    if(Number.isFinite(queue.queue_packets)){state.queueSize=queue.queue_packets;$('queue-size').value=state.queueSize;$('queue-value').textContent=fmt(state.queueSize);}
+  }
   async function boot() {
     setupEvents();populateIncident();
-    try{state.bootstrap=await api('/api/bootstrap');await loadSimulation(true);}
+    try{state.bootstrap=await api('/api/bootstrap');applyDefaults(state.bootstrap.simulation_defaults||{});await loadSimulation(true);}
     catch(error){toast(`Start the local Python server: ${error.message}`);$('chapter-title').textContent='The local service needs attention.';$('chapter-copy').textContent='Run python demo/server.py in the project, then reload this page.';}
     const hash=location.hash.slice(1);if(['incident','learn'].includes(hash))navigate(hash);
     requestAnimationFrame(loop);

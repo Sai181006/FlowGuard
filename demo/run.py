@@ -107,6 +107,85 @@ def recorded_demo():
             print("  " + line)
 
 
+BENCHMARK_PATH = ROOT / "results/benchmarks/detector-benchmark.json"
+DETECTOR_LABELS = {"threshold": "Two-window threshold", "ewma": "EWMA control chart",
+                   "cusum": "CUSUM change detector", "entropy": "Traffic-mix divergence (KL)"}
+
+
+def _scenario_order(names):
+    """Benchmark scenarios in catalogue order (demo/scenarios.py), unknown ones last."""
+    try:
+        from demo.scenarios import SCENARIOS
+        catalogue = list(SCENARIOS)
+    except ImportError:
+        catalogue = []
+    return [name for name in catalogue if name in names] + sorted(set(names) - set(catalogue))
+
+
+def _benchmark_cell(row):
+    if row.get("benign"):
+        return f"FP {row['false_positive_runs']}/{row['runs']}"
+    rate = row.get("detection_rate") or 0.0
+    latency = row.get("median_latency_s")
+    return f"{rate * 100:.0f}%" + (f" ({latency:g} s)" if latency is not None else "")
+
+
+def benchmark_lines(data):
+    """Matrix and data-driven interpretation of the committed detector benchmark."""
+    detectors = list(data["detectors"])
+    results = data["results"]
+    parameters = data.get("parameters", {})
+    scenarios = _scenario_order({name for detector in detectors for name in results[detector]})
+    width = max(len("scenario"), *(len(name) + len(" (benign)") for name in scenarios))
+    lines = [f"Seeds: {parameters.get('seeds', '?')} per cell (base {parameters.get('seed_base', '?')}), "
+             f"{parameters.get('pps_per_attacker', '?')} packets/s per attacker; "
+             f"config digest {str(parameters.get('config_digest', ''))[:12]}.", ""]
+    header = "scenario".ljust(width) + "".join(f" | {name:>13}" for name in detectors)
+    lines += [header, "-" * len(header)]
+    for scenario in scenarios:
+        benign = results[detectors[0]][scenario].get("benign")
+        label = scenario + (" (benign)" if benign else "")
+        lines.append(label.ljust(width) + "".join(
+            f" | {_benchmark_cell(results[name][scenario]):>13}" for name in detectors))
+    lines += ["", "Read: % = share of seeded runs that alerted during the attack; (n s) = median latency",
+              "from attack start. FP a/b = runs with any alert where no alert is wanted.", "", "What it shows:"]
+    for scenario in scenarios:
+        rows = {name: results[name][scenario] for name in detectors}
+        if next(iter(rows.values())).get("benign"):
+            noisy = [name for name, row in rows.items() if row["false_positive_runs"]]
+            if noisy:
+                quiet = [name for name in detectors if name not in noisy]
+                lines.append(f"  {scenario}: false alerts from {', '.join(noisy)}"
+                             + (f"; only {', '.join(quiet)} stayed quiet." if quiet else "; no detector stayed quiet."))
+            continue
+        missed = [name for name, row in rows.items() if (row.get("detection_rate") or 0) < 0.5]
+        if missed and len(missed) < len(detectors):
+            caught = [name for name in detectors if name not in missed]
+            lines.append(f"  {scenario}: missed in most runs by {', '.join(missed)}; caught by {', '.join(caught)}.")
+        elif missed:
+            lines.append(f"  {scenario}: no detector catches it reliably.")
+    roc = data.get("roc") or {}
+    if roc:
+        lines += ["", "One tuning knob per detector (shipped value, true- and false-positive rate):"]
+        for name in detectors:
+            entry = roc.get(name)
+            if not entry:
+                continue
+            point = next((p for p in entry["points"] if float(p["value"]) == float(entry["shipped_value"])), None)
+            detail = f"TPR {point['tpr']:.2f}, FPR {point['fpr']:.2f}" if point else "not swept"
+            lines.append(f"  {name:<9} {entry['knob']} = {entry['shipped_value']:g}: {detail}")
+    lines += ["", "No single detector wins every row: each choice trades missed attacks against false alerts.",
+              "Provenance: " + (data.get("provenance", {}).get("method") or "simulated counters, real detector code") + ".",
+              "Regenerate: python3 experiments/benchmark_detectors.py --roc   (verify: --check)"]
+    return lines
+
+
+def benchmark_demo():
+    print("\nOFFLINE DETECTOR BENCHMARK — simulated scenarios, real detector code", flush=True)
+    data = json.loads(BENCHMARK_PATH.read_text(encoding="utf-8"))
+    print("\n".join(benchmark_lines(data)), flush=True)
+
+
 def loopback_demo():
     print("\nLIVE LOCAL UDP — real echo service and probe, no SDN switch or flood", flush=True)
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as reservation:
@@ -150,7 +229,7 @@ def loopback_demo():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scenario", choices=("detector", "recorded", "loopback", "bugs", "all"), default="all")
+    parser.add_argument("--scenario", choices=("detector", "recorded", "loopback", "bugs", "benchmark", "all"), default="all")
     parser.add_argument("--step", action="store_true", help="Pause between simulated detector windows")
     args = parser.parse_args()
     if args.step and not sys.stdin.isatty():
@@ -161,6 +240,8 @@ def main():
         recorded_demo()
     if args.scenario in ("loopback", "all"):
         loopback_demo()
+    if args.scenario == "benchmark":
+        benchmark_demo()
     if args.scenario == "bugs":
         print("OFFLINE REGRESSION CHECKS — passing tests verify current hardening and experiment integrity", flush=True)
         subprocess.run([sys.executable, str(ROOT / "audit/reproduce.py")], check=True)

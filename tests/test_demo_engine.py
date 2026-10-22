@@ -1,12 +1,18 @@
+from contextlib import redirect_stdout
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
 from tempfile import TemporaryDirectory
+import io
+import json
+import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 
-from demo.engine import recorded_data, simulate
+from demo import terminal
+from demo.engine import ALL_SCENARIOS, recorded_data, simulate
 from demo.server import DASHBOARD_ROOT, FlowGuardHandler, static_asset
 
 
@@ -206,6 +212,137 @@ class DashboardServerSecurityTests(unittest.TestCase):
 
         status, _, _ = self._request("GET", "/assets/%2e%2e/README.md")
         self.assertEqual(status, 404)
+
+
+class AdvancedSimulationTests(unittest.TestCase):
+    def test_explicit_shipped_options_match_the_defaults(self):
+        for scenario in ("normal", "burst", "sustained", "waves", "single-source", "low-rate"):
+            with self.subTest(scenario=scenario):
+                default = simulate(scenario, mitigation=True)
+                explicit = simulate(scenario, mitigation=True, detector="threshold", action="drop",
+                                    backoff=False, rate_limit_pps=20)
+                self.assertEqual(default["frames"], explicit["frames"])
+                self.assertEqual(default["events"], explicit["events"])
+                self.assertIsNone(default["frames"][10]["queue_depth_packets"])
+                self.assertEqual(default["frames"][10]["detector_state"]["detector"], "threshold")
+                self.assertTrue(all(rule["status"] == "modeled drop"
+                                    for frame in default["frames"] for rule in frame["active_rules"]))
+
+    def test_rate_limit_passes_burst_then_configured_rate(self):
+        result = simulate("sustained", mitigation=True, action="rate_limit")
+
+        self.assertEqual([event["t_s"] for event in _events(result, "ratelimit_requested")], [7, 7, 19, 19])
+        # Rules installed at t = 7 apply from the interval [7, 8): the 20-packet
+        # burst plus 20 pps in that first second, then 20 pps.
+        self.assertEqual(result["frames"][8]["source_delivered_pps"]["10.0.0.21"], 40)
+        self.assertEqual(result["frames"][9]["source_delivered_pps"]["10.0.0.21"], 20)
+        self.assertEqual(result["frames"][9]["source_dropped_pps"]["10.0.0.21"], 580)
+        rule = result["frames"][9]["active_rules"][0]
+        self.assertEqual(rule["status"], "modeled rate-limit 20 pps")
+        self.assertEqual((rule["action"], rule["rate_pps"], rule["ttl_s"]), ("rate_limit", 20, 10))
+        # As in the controller, a source under a rule reads as 0 pps to the detector.
+        self.assertEqual(result["frames"][9]["detector_input"]["source_pps"]["10.0.0.21"], 0)
+        custom = simulate("sustained", mitigation=True, action="rate_limit", rate_limit_pps=50)
+        self.assertEqual(custom["frames"][9]["source_delivered_pps"]["10.0.0.21"], 50)
+
+    def test_graduated_rate_limits_first_and_drops_repeat_offenders(self):
+        result = simulate("waves", mitigation=True, action="graduated")
+        actions = [(entry["action"], entry["offense_count"])
+                   for entry in result["summary"]["rules"] if entry["source"] == "10.0.0.21"]
+
+        self.assertEqual(actions[0], ("rate_limit", 1))
+        self.assertGreater(len(actions), 1)
+        self.assertTrue(all(action == "drop" for action, count in actions[1:] if count >= 2))
+
+    def test_repeat_offender_backoff_doubles_the_rule_lifetime(self):
+        plain = simulate("repeat-offender", mitigation=True)
+        backoff = simulate("repeat-offender", mitigation=True, backoff=True)
+
+        def ttls(result):
+            return [entry["ttl_s"] for entry in result["summary"]["rules"] if entry["source"] == "10.0.0.21"]
+
+        self.assertEqual(plain["timeline"]["duration_s"], 50)
+        self.assertEqual(len(plain["frames"]), 51)
+        self.assertEqual(ttls(plain), [10, 10, 10])
+        # The second offense gets 20 s (installed at 24 s, active until 44 s), which
+        # already covers the whole third wave [39, 44): it is never re-detected.
+        self.assertEqual(ttls(backoff), [10, 20])
+        self.assertEqual([frame["source_delivered_pps"]["10.0.0.21"] for frame in backoff["frames"][40:45]],
+                         [0, 0, 0, 0, 0])
+        self.assertEqual(plain["frames"][40]["source_delivered_pps"]["10.0.0.21"], 600)
+        self.assertIn("Offense 2.", next(event["message"] for event in _events(backoff, "drop_requested")
+                                         if event["t_s"] == 24))
+
+    def test_bottleneck_queue_shows_mitigation_restoring_client_success(self):
+        off = simulate("sustained", mitigation=False, pps=2000, queue_packets=50)
+        on = simulate("sustained", mitigation=True, pps=2000, queue_packets=50)
+
+        self.assertLess(off["frames"][10]["client_success"], 0.5)
+        self.assertEqual(off["frames"][10]["queue_depth_packets"], 50)
+        self.assertGreater(off["frames"][10]["queue_drops_pps"], 0)
+        self.assertAlmostEqual(off["frames"][10]["queue_delay_ms"], 50.0)
+        self.assertEqual(on["frames"][10]["client_success"], 1.0)
+        self.assertGreater(on["summary"]["mean_client_success"], off["summary"]["mean_client_success"])
+        self.assertEqual(on["summary"]["queue"]["queue_packets"], 50)
+
+    def test_every_detector_runs_every_scenario_and_serializes(self):
+        for detector in ("threshold", "ewma", "cusum", "entropy"):
+            for scenario in [item["id"] for item in ALL_SCENARIOS]:
+                with self.subTest(detector=detector, scenario=scenario):
+                    result = simulate(scenario, mitigation=True, detector=detector, action="graduated",
+                                      backoff=True, queue_packets=50, noise_seed=7)
+                    json.dumps(result, allow_nan=False)
+                    self.assertEqual(result["provenance"]["detector"], detector)
+                    self.assertIn("Detector", result["provenance"]["label"])
+                    self.assertTrue(result["provenance"]["model"].startswith("Model:"))
+                    self.assertEqual(result["frames"][-1]["detector_state"]["detector"], detector)
+
+    def test_new_scenarios_shape_the_model(self):
+        three = simulate("three-source", mitigation=True)
+        self.assertIn("10.0.0.23", three["frames"][6]["source_offered_pps"])
+        self.assertEqual(sorted(rule["source"] for rule in three["frames"][9]["active_rules"]),
+                         ["10.0.0.21", "10.0.0.22", "10.0.0.23"])
+        self.assertEqual(simulate("pulsing", mitigation=True)["summary"]["alert_count"], 0)
+        self.assertGreater(simulate("pulsing", mitigation=True, detector="cusum")["summary"]["alert_count"], 0)
+        self.assertEqual(simulate("flash-crowd", detector="entropy")["summary"]["alert_count"], 0)
+
+    def test_noise_is_seeded_and_options_are_validated(self):
+        self.assertEqual(simulate("sustained", noise_seed=3), simulate("sustained", noise_seed=3))
+        self.assertNotEqual(simulate("sustained", noise_seed=3)["frames"], simulate("sustained")["frames"])
+        for kwargs in ({"detector": "magic"}, {"action": "nuke"}, {"rate_limit_pps": 0},
+                       {"queue_packets": 0}, {"noise_seed": -1}, {"scenario": "unknown"}):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError):
+                    simulate(**kwargs)
+
+
+class TerminalSectionTests(unittest.TestCase):
+    def test_detectors_section_prints_the_committed_benchmark(self):
+        output = io.StringIO()
+        with patch.object(sys, "argv", ["terminal.py", "--section", "detectors"]), redirect_stdout(output):
+            self.assertEqual(terminal.main(), 0)
+        text = output.getvalue()
+        self.assertIn("OFFLINE DETECTOR BENCHMARK", text)
+        self.assertIn("pulsing", text)
+        self.assertIn("FP 0/20", text)
+
+    def test_bottleneck_section_runs_the_live_lab_comparison(self):
+        calls = []
+
+        def fake_run(command, *args, **kwargs):
+            calls.append(command)
+            return subprocess.CompletedProcess(command, 0)
+
+        with patch.object(sys, "argv", ["terminal.py", "--section", "bottleneck"]), \
+                patch.object(terminal, "doctor", return_value={"passed": True}), \
+                patch.object(terminal, "live_lab_supports_bottleneck", return_value=True), \
+                patch.object(terminal.subprocess, "run", side_effect=fake_run), \
+                redirect_stdout(io.StringIO()):
+            self.assertEqual(terminal.main(), 0)
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0][1].endswith("live_lab.py"))
+        self.assertEqual(calls[0][2:], ["--bottleneck-pps", "300", "--queue-packets", "50", "--mitigation", "compare"])
+
 
 if __name__ == "__main__":
     unittest.main()

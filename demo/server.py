@@ -24,6 +24,9 @@ from demo import engine
 
 
 MAX_POST_BYTES = 4096
+MIN_QUEUE_PACKETS = 5
+MAX_QUEUE_PACKETS = 10_000
+MAX_RATE_LIMIT_PPS = 100_000
 DASHBOARD_ROOT = ROOT / "dashboard"
 STATIC_FILES = {
     "/": (ROOT / "dashboard/index.html", "text/html; charset=utf-8"),
@@ -107,6 +110,16 @@ def _float_param(query, key, default, minimum=0.0, maximum=1_000_000.0):
     if not minimum <= value <= maximum:
         raise ValueError(f"{key} must be between {minimum:g} and {maximum:g}")
     return value
+
+
+def _choice_param(query, key, allowed):
+    """An optional value that must be one of the allow-listed names."""
+    raw = _single_query(query, key, None)
+    if raw is None:
+        return None
+    if raw not in allowed:
+        raise ValueError(f"{key} must be one of: {', '.join(allowed)}")
+    return raw
 
 
 def _bool_param(query, key, default):
@@ -212,6 +225,14 @@ class FlowGuardHandler(BaseHTTPRequestHandler):
                     1,
                     10,
                 )
+                detector = _choice_param(query, "detector", engine.DETECTOR_NAMES)
+                action = _choice_param(query, "action", engine.MITIGATION_ACTIONS)
+                backoff = _bool_param(query, "backoff", None) if "backoff" in query else None
+                rate_limit = (_int_param(query, "rate_limit", None, 1, MAX_RATE_LIMIT_PPS)
+                              if "rate_limit" in query else None)
+                queue = _int_param(query, "queue", 0, 0, MAX_QUEUE_PACKETS) if "queue" in query else 0
+                if 0 < queue < MIN_QUEUE_PACKETS:
+                    raise ValueError(f"queue must be 0 (off) or between {MIN_QUEUE_PACKETS} and {MAX_QUEUE_PACKETS}")
                 result = engine.simulate(
                     scenario=scenario,
                     mitigation=mitigation,
@@ -221,11 +242,25 @@ class FlowGuardHandler(BaseHTTPRequestHandler):
                     source_pps=source_pps,
                     min_sources=min_sources,
                     consecutive_windows=consecutive,
+                    detector=detector,
+                    action=action,
+                    backoff=backoff,
+                    rate_limit_pps=rate_limit,
+                    queue_packets=queue or None,
                 )
             except (ValueError, TypeError) as exc:
                 self._error(str(exc), 400)
                 return
             self._json(result)
+            return
+
+        if path == "/api/benchmark":
+            try:
+                self._json(engine.benchmark_data())
+            except FileNotFoundError:
+                self._error("The offline detector benchmark has not been generated.", 404)
+            except (OSError, ValueError) as exc:
+                self._error(f"Could not load the offline detector benchmark: {exc}", 500)
             return
 
         if path == "/api/recorded":
