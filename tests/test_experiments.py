@@ -372,8 +372,10 @@ class BottleneckTrialTests(TrialValidationTests):
         self.assertEqual(metadata["config_source"], "config/detector.json")
         self.assertNotIn("bottleneck_qdisc", metadata["validation"]["checks"])
         self.assertEqual(len(seen["probes"]), 5)  # three primes, client, recovery
+        self.assertEqual(metadata["probe_mode"], "stopwait")
         for command in seen["probes"]:
             self.assertEqual(command[command.index("--format") + 1], "binary")
+            self.assertEqual(command[command.index("--mode") + 1], "stopwait")
             metrics = command[command.index("--metrics-json") + 1]
             self.assertTrue(metrics.endswith(".metrics.json"))
         client = next(command for command in seen["probes"] if command[command.index("--count") + 1] == "20")
@@ -388,6 +390,8 @@ class BottleneckTrialTests(TrialValidationTests):
             seen["after"] = json.loads((output / "qdisc-after.json").read_text(encoding="utf-8"))
             seen["samples"] = analyze.jsonl(output / "qdisc.jsonl")
             seen["tc_commands"] = [call.args[0] for call in check_output.call_args_list]
+            seen["probe_modes"] = {command[command.index("--mode") + 1]
+                                   for _, command in network.commands if "probe.py" in command[2]}
 
         exit_status, metadata, failure = self._run_attack_on(
             12, 10, extra_args=(*self.BOTTLENECK, "--detector", "ewma", "--probe-format", "text"),
@@ -400,6 +404,9 @@ class BottleneckTrialTests(TrialValidationTests):
                                                   "queue_packets": 50, "qdisc": "fifo"})
         self.assertEqual(metadata["config"]["detector"], "ewma")
         self.assertEqual(metadata["probe_format"], "text")
+        # Lost replies must not stall the probe schedule under congestion.
+        self.assertEqual(metadata["probe_mode"], "stream")
+        self.assertEqual(seen["probe_modes"], {"stream"})
         self.assertEqual(metadata["validation"]["checks"]["bottleneck_qdisc"]["status"], "passed")
         self.assertEqual(metadata["validation"]["checks"]["bottleneck_qdisc_after"]["status"], "passed")
         self.assertEqual(metadata["validation"]["status"], "passed")

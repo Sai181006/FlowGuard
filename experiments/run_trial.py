@@ -61,12 +61,13 @@ def metrics_path(output):
     return output.with_name(output.stem + ".metrics.json")
 
 
-def probe(host, output, count, interval_ms, probe_format="binary"):
+def probe(host, output, count, interval_ms, probe_format="binary", probe_mode="stopwait"):
     stream = open(output, "w", encoding="utf-8")
     process = host.popen(
         [sys.executable, "-u", str(ROOT / "traffic" / "probe.py"),
          "--count", str(count), "--interval-ms", str(interval_ms),
-         "--format", probe_format, "--metrics-json", str(metrics_path(output))],
+         "--format", probe_format, "--mode", probe_mode,
+         "--metrics-json", str(metrics_path(output))],
         stdout=stream, stderr=subprocess.STDOUT,
     )
     return process, stream
@@ -260,8 +261,14 @@ def main():
                 "measurements": {}}
     exit_status = 0
 
+    # Under a bottleneck, stop-and-wait probing would stall 500 ms on every lost
+    # reply and drift out of the attack window; stream mode keeps a fixed
+    # 10-probe/s schedule so loss is measured during the attack itself.
+    probe_mode = "stream" if bottleneck else "stopwait"
+    metadata["probe_mode"] = probe_mode
+
     def start_probe(host, path, count, interval_ms):
-        return probe(host, path, count, interval_ms, args.probe_format)
+        return probe(host, path, count, interval_ms, args.probe_format, probe_mode)
 
     def stop_qdisc_monitor():
         if qdisc_monitor is not None and qdisc_monitor.active:
@@ -373,7 +380,7 @@ def main():
                 time.sleep(min(5, args.duration_s / 2))
                 dump_flows(output / f"flows-during-wave{wave}.txt")
                 for host_name, process in wave_children:
-                    process.wait(timeout=args.duration_s + 10)
+                    process.wait(timeout=args.duration_s * 6 + 10)
                     if process.returncode != 0 and host_name != "client":
                         raise RuntimeError(f"wave {wave} flood process failed: {host_name}")
                 client_stream.close()
@@ -412,7 +419,7 @@ def main():
             time.sleep(min(5, args.duration_s / 2))
             dump_flows(output / "flows-during.txt")
             for host_name, process in children:
-                process.wait(timeout=args.duration_s + 10)
+                process.wait(timeout=args.duration_s * 6 + 10)
                 if process.returncode != 0 and host_name != "client":
                     raise RuntimeError(f"flood process failed: {host_name}")
             client_stream.close()
